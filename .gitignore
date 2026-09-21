@@ -1,0 +1,5 @@
+graph
+graph-shot.png
+*.dSYM/
+.DS_Store
+*.log
