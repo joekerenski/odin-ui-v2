@@ -14,6 +14,8 @@ import "core:math"
 import "core:os"
 import rl "vendor:raylib"
 
+FONT :: "fonts/Inter-Medium.ttf"
+
 main :: proc() {
 	shot := false
 	for a in os.args[1:] {
@@ -40,9 +42,9 @@ main :: proc() {
 	})
 	defer ui.shutdown()
 
-	ui.load_font(ui.theme.font_title, ui.theme.size_title, "fonts/Regulator-Nova-Medium.ttf")
-	ui.load_font(ui.theme.font_body, ui.theme.size_body, "fonts/Regulator-Nova-Medium.ttf")
-	ui.load_font(ui.theme.font_small, ui.theme.size_small, "fonts/Regulator-Nova-Medium.ttf")
+	ui.load_font(ui.theme.font_title, ui.theme.size_title, FONT)
+	ui.load_font(ui.theme.font_body, ui.theme.size_body, FONT)
+	ui.load_font(ui.theme.font_small, ui.theme.size_small, FONT)
 
 	drag_id := -1
 	frame_n := 0
