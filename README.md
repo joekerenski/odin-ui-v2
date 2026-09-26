@@ -2,15 +2,19 @@
 
 Clay layout, raylib drawing, one window loop. Raylib is 6.0: the Odin compiler's bindings, vendored in `deps/raylib` with a Linux build that runs natively on Wayland (see [deps/raylib/README.md](deps/raylib/README.md)). Clay is the bindings and static lib from [nicbarker/clay](https://github.com/nicbarker/clay) `e6cc369`.
 
-The first app is a force-directed graph: nodes repel, edges are springs, a weak pull keeps the cloud on the canvas. The panel is there to drive the model.
+The app has two tabs under a top bar. **Graph** is a force-directed graph: nodes repel, edges are springs, a weak pull keeps the cloud on the canvas, and the side panel drives the model. **Showcase** is a scrollable column of cards with every widget, a place to try things out ([app/showcase.odin](app/showcase.odin)); `./run.sh --showcase` starts there.
 
 ```bash
-./run.sh
+./run.sh              # build and run (Odin deletes the binary afterwards)
+./build.sh            # optimized standalone binary: ./graph
+./build.sh debug      # with symbols, for gdb/lldb: ./graph-debug
 ```
+
+The font, raylib and GLFW are built into the binary, so `./graph` runs from any directory. On Linux it links dynamically only against libc, `libX11` and `libwayland-client`, which any desktop has.
 
 Use Odin's [official release](https://github.com/odin-lang/Odin/releases) (built and tested with `dev-2026-09`). Arch's `odin` package ships `vendor/` libraries as Git LFS pointer files, and macOS and Windows link raylib from the compiler.
 
-Drag a node. **Link** then click another node to tie it to the selection. **N** adds a node, **delete** removes the selection, **space** pauses, **F** is fullscreen, **esc** quits. **F3** hides the timing strip.
+On the Graph tab: drag a node. **Link** then click another node to tie it to the selection. **N** adds a node, **delete** removes the selection, **space** pauses, **F** is fullscreen, **esc** quits. **F3** hides the timing strip. **Ctrl +/−/0** zooms the UI from 50% to 200% (**Cmd** on macOS); zooming in stops before the layout gets smaller than the 720×480 minimum window.
 
 ## macOS
 

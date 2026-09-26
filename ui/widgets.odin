@@ -28,7 +28,7 @@ divider :: proc(id: string) {
 
 // Full-window root with background fill. Use transparent=true when the host
 // draws content underneath the UI (see host_raylib / host_sokol).
-root_begin :: proc(id: string = "Root", transparent: bool = false) -> bool {
+root_begin :: proc(id: string = "Root", transparent: bool = false, direction: clay.LayoutDirection = .LeftToRight) -> bool {
 	clay.OpenElementWithId(clay.ID(id))
 	bg := theme.bg
 	if transparent {
@@ -37,7 +37,7 @@ root_begin :: proc(id: string = "Root", transparent: bool = false) -> bool {
 	return clay.ConfigureOpenElement(clay.ElementDeclaration{
 		layout = {
 			sizing          = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
-			layoutDirection = .LeftToRight,
+			layoutDirection = direction,
 		},
 		backgroundColor = bg,
 	})
@@ -49,9 +49,11 @@ Panel_Opts :: struct {
 	clip_x: bool,
 }
 
-// Side panel column.
+// Side panel column. Scrolls when its content is taller than the window;
+// close it with panel_end(id), which draws the scrollbar.
 panel_begin :: proc(id: string = "Panel", width: f32 = 0, opts: Panel_Opts = {}) -> bool {
 	w := width if width > 0 else theme.panel_w
+	scrollbar_drag(id)
 	clay.OpenElementWithId(clay.ID(id))
 	return clay.ConfigureOpenElement(clay.ElementDeclaration{
 		layout = {
@@ -61,8 +63,13 @@ panel_begin :: proc(id: string = "Panel", width: f32 = 0, opts: Panel_Opts = {})
 			childGap        = styles.panel.gap,
 		},
 		backgroundColor = styles.panel.bg,
-		clip            = {horizontal = opts.clip_x},
+		clip            = {horizontal = opts.clip_x, vertical = true, childOffset = clay.GetScrollOffset()},
 	})
+}
+
+panel_end :: proc(id: string = "Panel") {
+	clay.CloseElement()
+	scrollbar(id)
 }
 
 // Growable content area (e.g. canvas). Host draws into this via region/clip.
@@ -74,9 +81,201 @@ canvas_begin :: proc(id: string = "Canvas", bg: Color = {8, 10, 16, 255}) -> boo
 	})
 }
 
-// Closes a container opened by root_begin, panel_begin, or canvas_begin.
+// Full-width bar with a bottom border, children in a centered row. Put it
+// first in a root opened with direction = .TopToBottom.
+top_bar_begin :: proc(id: string = "TopBar") -> bool {
+	st := styles.top_bar
+	clay.OpenElementWithId(clay.ID(id))
+	return clay.ConfigureOpenElement(clay.ElementDeclaration{
+		layout = {
+			sizing          = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)},
+			layoutDirection = .LeftToRight,
+			padding         = clay.Padding{st.padding, st.padding, 0, 0},
+			childGap        = st.gap,
+			childAlignment  = {y = .Center},
+		},
+		backgroundColor = st.bg,
+		border          = {color = st.border, width = clay.BorderWidth{bottom = 1}},
+	})
+}
+
+Box_Opts :: struct {
+	gap:     u16,
+	padding: u16,
+	grow_h:  bool,  // fill the parent's height too (a body row under a top bar)
+	height:  f32,   // fixed height; 0 fits the children
+	bg:      Color, // alpha 0 = no fill
+	radius:  f32,
+}
+
+// Horizontal container, full width. Children share the width: controls that
+// grow (button, toggle, slider) split it evenly.
+row_begin :: proc(id: string, opts: Box_Opts = {}) -> bool {
+	return box_begin(id, .LeftToRight, opts)
+}
+
+// Vertical container, full width, children stacked.
+column_begin :: proc(id: string, opts: Box_Opts = {}) -> bool {
+	return box_begin(id, .TopToBottom, opts)
+}
+
+@(private)
+box_begin :: proc(id: string, direction: clay.LayoutDirection, opts: Box_Opts) -> bool {
+	h := clay.SizingFit({})
+	if opts.grow_h {
+		h = clay.SizingGrow({})
+	} else if opts.height > 0 {
+		h = clay.SizingFixed(opts.height)
+	}
+	clay.OpenElementWithId(clay.ID(id))
+	return clay.ConfigureOpenElement(clay.ElementDeclaration{
+		layout = {
+			sizing          = {width = clay.SizingGrow({}), height = h},
+			layoutDirection = direction,
+			padding         = clay.PaddingAll(opts.padding),
+			childGap        = opts.gap,
+			childAlignment  = {y = .Center} if direction == .LeftToRight else {},
+		},
+		backgroundColor = opts.bg,
+		cornerRadius    = clay.CornerRadiusAll(opts.radius),
+	})
+}
+
+// Bordered surface with a title, children stacked. Width grows up to
+// `styles.card.max_w`; a parent that centers children centers the card.
+card_begin :: proc(id, title_text: string, subtitle: string = "") -> bool {
+	st := styles.card
+	clay.OpenElementWithId(clay.ID(id))
+	open := clay.ConfigureOpenElement(clay.ElementDeclaration{
+		layout = {
+			sizing          = {width = clay.SizingGrow({max = st.max_w}), height = clay.SizingFit({})},
+			layoutDirection = .TopToBottom,
+			padding         = clay.PaddingAll(st.padding),
+			childGap        = st.gap,
+		},
+		backgroundColor = st.bg,
+		border          = {color = st.border, width = clay.BorderWidth{1, 1, 1, 1, 0}},
+		cornerRadius    = clay.CornerRadiusAll(st.radius),
+	})
+	text(title_text, theme.font_body, theme.size_body, st.title)
+	if subtitle != "" {
+		dim(subtitle)
+	}
+	return open
+}
+
+// Fixed-size filled rectangle. width 0 grows to fill the row. An outline
+// (alpha > 0) draws a 1px border, so a color that matches its background
+// still shows.
+swatch :: proc(id: string, color: Color, width: f32 = 0, height: f32 = 0, radius: f32 = -1, outline: Color = {}) {
+	w := clay.SizingGrow({}) if width <= 0 else clay.SizingFixed(width)
+	h := height if height > 0 else theme.row_h
+	r := radius if radius >= 0 else theme.radius_sm
+	bw: u16 = 1 if outline.a > 0 else 0
+	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
+		layout          = {sizing = {width = w, height = clay.SizingFixed(h)}},
+		backgroundColor = color,
+		border          = {color = outline, width = clay.BorderWidth{bw, bw, bw, bw, 0}},
+		cornerRadius    = clay.CornerRadiusAll(r),
+	}) {}
+}
+
+// Closes a container opened by root_begin, canvas_begin, top_bar_begin,
+// row_begin, column_begin, or card_begin. (panel_begin and scroll_begin have
+// their own _end, which also draws the scrollbar.)
 element_end :: proc() {
 	clay.CloseElement()
+}
+
+// --- scroll container -------------------------------------------------------
+
+// Vertical scroll area that fills its parent, children stacked and centered.
+// The wheel scrolls whatever container is under the pointer (Clay does that in
+// begin_layout). The thumb is a floating child; dragging it maps the pointer
+// across the track. Close with scroll_end(id).
+//
+// The drag is resolved here, before the container opens, so the new offset
+// lands in this frame's layout.
+scroll_begin :: proc(id: string) -> bool {
+	st := styles.scroll
+	scrollbar_drag(id)
+	clay.OpenElementWithId(clay.ID(id))
+	return clay.ConfigureOpenElement(clay.ElementDeclaration{
+		layout = {
+			sizing          = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+			layoutDirection = .TopToBottom,
+			padding         = clay.PaddingAll(st.padding),
+			childGap        = st.gap,
+			childAlignment  = {x = .Center},
+		},
+		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+	})
+}
+
+scroll_end :: proc(id: string) {
+	clay.CloseElement()
+	scrollbar(id)
+}
+
+// Where on the thumb the drag grabbed it, so the thumb doesn't jump.
+@(private)
+_scroll_grab: f32
+
+// Resolve a drag on scroll container `id`'s thumb. Call before the container
+// opens, so the new offset lands in this frame's layout.
+@(private)
+scrollbar_drag :: proc(id: string) {
+	st := styles.scroll
+	thumb_id := fmt.tprintf("%s_thumb", id)
+	data := clay.GetScrollContainerData(clay.ID(id))
+	if !drag_update(thumb_id) || !data.found {
+		return
+	}
+	thumb, t_ok := element_box(thumb_id)
+	view, v_ok := element_box(id)
+	travel := data.scrollContainerDimensions.height - 2 * st.inset - thumb.height
+	max_scroll := data.contentDimensions.height - data.scrollContainerDimensions.height
+	if t_ok && v_ok && travel > 0 && max_scroll > 0 {
+		if mouse_pressed(.Left) {
+			_scroll_grab = input.mouse_y - thumb.y
+		}
+		t := math.clamp((input.mouse_y - _scroll_grab - view.y - st.inset) / travel, 0, 1)
+		data.scrollPosition.y = -t * max_scroll
+	}
+}
+
+// The thumb for scroll container `id`, as a floating child, when its content
+// overflows. Call after the container closes.
+@(private)
+scrollbar :: proc(id: string) {
+	st := styles.scroll
+	data := clay.GetScrollContainerData(clay.ID(id))
+	view := data.scrollContainerDimensions.height
+	content := data.contentDimensions.height
+	if !data.found || content <= view + 0.5 {
+		return
+	}
+	track := view - 2 * st.inset
+	thumb_h := math.clamp(track * view / content, st.min_thumb, track)
+	t := math.clamp(-data.scrollPosition.y / (content - view), 0, 1)
+
+	thumb_id := fmt.tprintf("%s_thumb", id)
+	col := st.thumb
+	if hovered(thumb_id) || dragging(thumb_id) {
+		col = st.thumb_hot
+	}
+	if clay.UI(clay.ID(thumb_id))(clay.ElementDeclaration{
+		layout          = {sizing = {width = clay.SizingFixed(st.width), height = clay.SizingFixed(thumb_h)}},
+		backgroundColor = col,
+		cornerRadius    = clay.CornerRadiusAll(st.width * 0.5),
+		floating = {
+			attachTo   = .ElementWithId,
+			parentId   = clay.ID(id).id,
+			attachment = {element = .RightTop, parent = .RightTop},
+			offset     = {-st.inset, st.inset + t * (track - thumb_h)},
+			zIndex     = 5,
+		},
+	}) {}
 }
 
 // --- button -----------------------------------------------------------------
@@ -214,8 +413,8 @@ slider :: proc(id, label: string, value: f32, lo, hi: f32, value_fmt: string = "
 		cornerRadius    = clay.CornerRadiusAll(styles.slider.height * 0.5),
 	}) {}
 
-	// Knob from previous-frame track box. Floats unclipped (clipTo=.None) — it
-	// is bigger than the track and hangs past the ends at min/max by design.
+	// Knob from previous-frame track box. It is bigger than the track and hangs
+	// past the ends at min/max by design; see custom_circle_at for clipping.
 	if box, ok := element_box(id); ok {
 		t := math.clamp((v - lo) / (hi - lo), 0, 1)
 		x := box.x + t * box.width
@@ -330,6 +529,11 @@ dropdown :: proc(
 		state.open = !state.open
 		return result
 	}
+	// The menu floats unclipped, so it would ride over a top bar once its
+	// trigger scrolls under it. Close it on scroll instead.
+	if state.open && (input.wheel_x != 0 || input.wheel_y != 0) {
+		state.open = false
+	}
 	if state.open {
 		for _, i in options {
 			item_id := fmt.tprintf("%s_item_%d", id, i)
@@ -381,10 +585,65 @@ debug_strip :: proc() {
 	}) {
 		dim(fmt.tprintf("%d fps   busy %.2f / %.2f ms", st.fps, st.busy_ms, st.frame_ms))
 		dim(fmt.tprintf("clay %d KB   %d cmds   custom %d/%d", st.clay_kb, st.cmds, st.custom, st.custom_max))
-		dim("F3 hide")
+		dim(fmt.tprintf("zoom %d%%   F3 hide", int(math.round(st.zoom * 100))))
 	}
 }
 
+// Navigation tabs for a top bar: text labels, the selected one underlined in
+// the accent color. Items fit their label and fill the bar's height, so the
+// underline sits on the bar's bottom border. Returns the selected index.
+tab_bar :: proc(id: string, labels: []string, selected: int) -> int {
+	st := styles.tab_bar
+	result := selected
+	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
+		layout = {
+			sizing          = {width = clay.SizingFit({}), height = clay.SizingGrow({})},
+			layoutDirection = .LeftToRight,
+			childGap        = st.gap,
+		},
+	}) {
+		for label, i in labels {
+			item := fmt.tprintf("%s_%d", id, i)
+			on := i == selected
+			hot := !on && hovered(item)
+			tc := st.text
+			line := Color{}
+			if on {
+				tc = st.text_on
+				line = st.underline
+			} else if hot {
+				tc = st.text_hover
+				line = st.underline_hover
+			}
+			if clay.UI(clay.ID(item))(clay.ElementDeclaration{
+				layout = {
+					sizing          = {width = clay.SizingFit({}), height = clay.SizingGrow({})},
+					layoutDirection = .TopToBottom,
+				},
+			}) {
+				if clay.UI(clay.ID(item, 1))(clay.ElementDeclaration{
+					layout = {
+						sizing         = {width = clay.SizingFit({}), height = clay.SizingGrow({})},
+						padding        = clay.Padding{st.pad_x, st.pad_x, 0, 0},
+						childAlignment = {x = .Center, y = .Center},
+					},
+				}) {
+					text(label, theme.font_body, theme.size_body, tc)
+				}
+				if clay.UI(clay.ID(item, 2))(clay.ElementDeclaration{
+					layout          = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.underline_h)}},
+					backgroundColor = line,
+				}) {}
+			}
+			if clicked(item) {
+				result = i
+			}
+		}
+	}
+	return result
+}
+
+// Segmented control: equal-width pills. Returns the selected index.
 tabs :: proc(id: string, labels: []string, selected: int) -> int {
 	result := selected
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{

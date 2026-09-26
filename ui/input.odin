@@ -35,6 +35,11 @@ Key :: enum u16 {
 	A, B, C, D, E, F, G, H, I, J, K, L, M,
 	N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
 	F1, F3,
+	// By the character the key types in the current layout, not its position:
+	// Plus is whichever key types + or = (on a German layout, where US has ]).
+	// Pressed only; not tracked in keys_down.
+	Plus, Minus, Zero,
+	KP_Add, KP_Subtract, KP_0,
 }
 
 Mouse_Button :: enum u8 {

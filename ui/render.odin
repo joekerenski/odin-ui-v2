@@ -18,13 +18,19 @@ draw_circle :: proc(x, y, r: f32, color: Color) {
 	rl.DrawCircleV({x, y}, r, to_rl_color(color))
 }
 
+// Any vertex order. raylib wants counter-clockwise on screen and culls the
+// other winding, which dropped the left chevron and the dropdown's.
 draw_triangle :: proc(a, b, c: [2]f32, color: Color) {
+	b, c := b, c
+	if (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x) > 0 {
+		b, c = c, b
+	}
 	rl.DrawTriangle({a.x, a.y}, {b.x, b.y}, {c.x, c.y}, to_rl_color(color))
 }
 
-// Round a point-space coordinate onto the physical pixel grid.
+// Round a layout-space coordinate onto the physical pixel grid.
 snap_px :: proc(v: f32) -> f32 {
-	s := dpi_scale()
+	s := raster_scale()
 	return math.round(v * s) / s
 }
 
@@ -47,13 +53,14 @@ apply_overlay :: proc(color: Color, overlay: [dynamic]Color) -> Color {
 	}
 }
 
+// Scissor takes points, not layout units, so it applies the zoom itself.
 @(private)
 set_scissor :: proc(b: clay.BoundingBox) {
 	rl.BeginScissorMode(
-		i32(math.round(b.x)),
-		i32(math.round(b.y)),
-		i32(math.round(b.width)),
-		i32(math.round(b.height)),
+		i32(math.round(b.x * zoom)),
+		i32(math.round(b.y * zoom)),
+		i32(math.round(b.width * zoom)),
+		i32(math.round(b.height * zoom)),
 	)
 }
 
@@ -78,7 +85,7 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 				fonts[config.fontId].font,
 				cstr,
 				{snap_px(b.x), snap_px(b.y)},
-				f32(config.fontSize),
+				text_draw_size(config.fontId, config.fontSize),
 				f32(config.letterSpacing),
 				to_rl_color(apply_overlay(config.textColor, overlay)),
 			)

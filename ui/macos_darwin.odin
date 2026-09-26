@@ -138,7 +138,7 @@ input_monitor_invoke :: proc "c" (block: rawptr, event: rawptr) -> rawptr {
 		s_ev_wheel_x += f32(dx)
 		s_ev_wheel_y += f32(dy)
 	case EV_KEY_DOWN:
-		if k := key_from_code(intrinsics.objc_send(u16, obj, "keyCode")); k != .Unknown {
+		if k := key_from_event(obj); k != .Unknown {
 			s_key_down += {k}
 			// Auto-repeat is not a new press, same as raylib's IsKeyPressed.
 			if !intrinsics.objc_send(bool, obj, "isARepeat") {
@@ -147,7 +147,7 @@ input_monitor_invoke :: proc "c" (block: rawptr, event: rawptr) -> rawptr {
 		}
 		s_key_mods = mods_from_flags(intrinsics.objc_send(uint, obj, "modifierFlags"))
 	case EV_KEY_UP:
-		if k := key_from_code(intrinsics.objc_send(u16, obj, "keyCode")); k != .Unknown {
+		if k := key_from_event(obj); k != .Unknown {
 			s_key_down -= {k}
 		}
 		s_key_mods = mods_from_flags(intrinsics.objc_send(uint, obj, "modifierFlags"))
@@ -164,6 +164,38 @@ mods_from_flags :: proc(flags: uint) -> (mods: bit_set[Mod]) {
 	if flags & (1 << 19) != 0 do mods += {.Alt}
 	if flags & (1 << 20) != 0 do mods += {.Super}
 	return
+}
+
+@(private)
+key_from_event :: proc(obj: ^Foundation.Object) -> Key {
+	if k := key_from_code(intrinsics.objc_send(u16, obj, "keyCode")); k != .Unknown {
+		return k
+	}
+	return key_from_chars(obj)
+}
+
+// +, - and 0 by the character they type (Shift applies, other modifiers do
+// not), since their key codes are US positions: on a German layout + sits
+// where US has ].
+@(private)
+key_from_chars :: proc(obj: ^Foundation.Object) -> Key {
+	chars := intrinsics.objc_send(^Foundation.Object, obj, "charactersIgnoringModifiers")
+	if chars == nil {
+		return .Unknown
+	}
+	utf8 := intrinsics.objc_send(cstring, chars, "UTF8String")
+	if utf8 == nil {
+		return .Unknown
+	}
+	switch string(utf8) {
+	case "+", "=":
+		return .Plus
+	case "-":
+		return .Minus
+	case "0":
+		return .Zero
+	}
+	return .Unknown
 }
 
 // kVK_* virtual key codes: physical positions on an ANSI layout, as GLFW uses.
@@ -208,6 +240,9 @@ key_from_code :: proc(code: u16) -> Key {
 	case 0x06: return .Z
 	case 0x7A: return .F1
 	case 0x63: return .F3
+	case 0x45: return .KP_Add
+	case 0x4E: return .KP_Subtract
+	case 0x52: return .KP_0
 	}
 	return .Unknown
 }

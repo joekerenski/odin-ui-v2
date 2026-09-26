@@ -133,8 +133,9 @@ custom_push :: proc(d: Custom_Data) -> rawptr {
 }
 
 // Filled circle as a floating child of `parent_id`, centered at layout-space
-// (cx, cy). Size is 2*r. clipTo is .None on purpose: decorations may overflow
-// their parent (a slider knob is bigger than its track and hangs past the ends).
+// (cx, cy). Size is 2*r. clipTo is .AttachedParent: that clips to the parent's
+// enclosing clip region (a scroll container), not to the parent's own box, so
+// a knob still hangs past its track's ends but scrolls out under the edge.
 custom_circle_at :: proc(id, parent_id: string, cx, cy, r: f32, color: Color, index: u32 = 0) {
 	parent, ok := element_box(parent_id)
 	if !ok {
@@ -158,7 +159,7 @@ custom_circle_at :: proc(id, parent_id: string, cx, cy, r: f32, color: Color, in
 			offset     = {ox, oy},
 			zIndex     = 10,
 			attachment = {element = .LeftTop, parent = .LeftTop},
-			clipTo     = .None,
+			clipTo     = .AttachedParent,
 		},
 		custom = {customData = ptr},
 	}) {}
@@ -201,7 +202,7 @@ custom_triangle_at :: proc(id, parent_id: string, a, b, c: [2]f32, color: Color,
 			offset     = {ox, oy},
 			zIndex     = 10,
 			attachment = {element = .LeftTop, parent = .LeftTop},
-			clipTo     = .None,
+			clipTo     = .AttachedParent,
 		},
 		custom = {customData = ptr},
 	}) {}

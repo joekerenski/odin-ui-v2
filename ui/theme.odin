@@ -28,9 +28,11 @@ Theme :: struct {
 	pad_md: u16,
 	gap_md: u16,
 
-	row_h:    f32, // default control height
-	slider_h: f32,
-	panel_w:  f32,
+	row_h:     f32, // default control height
+	slider_h:  f32,
+	panel_w:   f32,
+	bar_h:     f32, // top bar
+	content_w: f32, // max width of centered content (cards)
 
 	font_title: u16,
 	font_body:  u16,
@@ -62,9 +64,11 @@ theme := Theme {
 	pad_md = 12,
 	gap_md = 10,
 
-	row_h    = 30,
-	slider_h = 10,
-	panel_w  = 300,
+	row_h     = 30,
+	slider_h  = 10,
+	panel_w   = 300,
+	bar_h     = 44,
+	content_w = 760,
 
 	font_title = 0,
 	font_body  = 1,
@@ -135,6 +139,45 @@ Icon_Style :: struct {
 	size:     f32,
 }
 
+Top_Bar_Style :: struct {
+	bg:      Color,
+	border:  Color,
+	height:  f32,
+	padding: u16,
+	gap:     u16,
+}
+
+Tab_Bar_Style :: struct {
+	text:            Color,
+	text_hover:      Color,
+	text_on:         Color,
+	underline:       Color,
+	underline_hover: Color,
+	underline_h:     f32,
+	pad_x:           u16,
+	gap:             u16,
+}
+
+Card_Style :: struct {
+	bg:      Color,
+	border:  Color,
+	title:   Color,
+	radius:  f32,
+	padding: u16,
+	gap:     u16,
+	max_w:   f32,
+}
+
+Scroll_Style :: struct {
+	thumb:     Color,
+	thumb_hot: Color,
+	width:     f32,
+	inset:     f32, // gap between thumb and the container edge
+	min_thumb: f32,
+	padding:   u16,
+	gap:       u16,
+}
+
 Widget_Styles :: struct {
 	button:   Button_Style,
 	toggle:   Toggle_Style,
@@ -142,6 +185,10 @@ Widget_Styles :: struct {
 	panel:    Panel_Style,
 	dropdown: Dropdown_Style,
 	icon:     Icon_Style,
+	top_bar:  Top_Bar_Style,
+	tab_bar:  Tab_Bar_Style,
+	card:     Card_Style,
+	scroll:   Scroll_Style,
 }
 
 styles: Widget_Styles
@@ -197,6 +244,41 @@ styles_from_theme :: proc(t: Theme) -> Widget_Styles {
 			glyph    = t.text,
 			radius   = t.radius_sm,
 			size     = 26,
+		},
+		top_bar = {
+			bg      = t.panel,
+			border  = t.border,
+			height  = t.bar_h,
+			padding = u16(t.pad_md + 2),
+			gap     = u16(t.gap_md * 2),
+		},
+		tab_bar = {
+			text            = t.text_dim,
+			text_hover      = t.text,
+			text_on         = t.text,
+			underline       = t.accent,
+			underline_hover = t.border,
+			underline_h     = 2,
+			pad_x           = t.pad_md,
+			gap             = 2,
+		},
+		card = {
+			bg      = t.panel,
+			border  = t.border,
+			title   = t.text,
+			radius  = t.radius_md,
+			padding = u16(t.pad_md + 4),
+			gap     = t.gap_md,
+			max_w   = t.content_w,
+		},
+		scroll = {
+			thumb     = t.surface,
+			thumb_hot = t.text_dim,
+			width     = 6,
+			inset     = 3,
+			min_thumb = 24,
+			padding   = u16(t.pad_md * 2),
+			gap       = u16(t.gap_md * 2),
 		},
 	}
 }

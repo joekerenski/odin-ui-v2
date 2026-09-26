@@ -1,4 +1,5 @@
 graph
+graph-debug
 graph-shot.png
 *.dSYM/
 .DS_Store

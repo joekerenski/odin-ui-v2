@@ -48,6 +48,10 @@ Window_Desc :: struct {
 	high_dpi:   bool,
 	msaa_4x:    bool,
 	target_fps: i32, // 0 = the display's refresh
+	// Smallest window, in points. Zooming in also stops where the layout
+	// would get smaller than this.
+	min_width:  i32,
+	min_height: i32,
 }
 
 quit_requested: bool
@@ -82,10 +86,14 @@ fps_acc: f32
 @(private)
 fps_frames: int
 
+// A font comes from a file (`path`, owned) or from memory (`data`, borrowed:
+// typically #load'ed, so it lives as long as the program). Kept so the font
+// can be re-rasterized when the display scale or zoom changes.
 Font_Slot :: struct {
 	font: rl.Font,
 	size: u16,
 	path: string,
+	data: []u8,
 }
 
 @(private)
@@ -94,8 +102,23 @@ fonts: [dynamic]Font_Slot
 @(private)
 shapes_tex: rl.Texture2D
 
+// Pixels per point at which fonts were last rasterized (display scale * zoom).
 @(private)
-loaded_dpi: f32
+loaded_scale: f32
+
+// UI zoom in effect. Everything the UI lays out is in "layout units"; one
+// unit is `zoom` points. Change it with set_zoom / zoom_in / zoom_out, which
+// apply at the start of the next frame so a frame never mixes two zooms.
+// It can sit below the requested zoom: see fit_zoom.
+zoom: f32 = 1
+
+ZOOM_STEPS := [?]f32{0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2}
+
+@(private)
+pending_zoom: f32 = 1
+
+@(private)
+min_size: [2]f32
 
 init :: proc(desc: Window_Desc) {
 	target_fps = desc.target_fps
@@ -113,6 +136,10 @@ init :: proc(desc: Window_Desc) {
 	rl.SetConfigFlags(flags)
 	rl.InitWindow(desc.width, desc.height, desc.title)
 	rl.SetExitKey(rl.KeyboardKey.KEY_NULL)
+	min_size = {f32(desc.min_width), f32(desc.min_height)}
+	if desc.min_width > 0 || desc.min_height > 0 {
+		rl.SetWindowMinSize(desc.min_width, desc.min_height)
+	}
 	// UI fills are triangles that sample this texel; raylib's own shape calls
 	// use it too.
 	white := rl.GenImageColor(1, 1, rl.WHITE)
@@ -126,10 +153,11 @@ init :: proc(desc: Window_Desc) {
 		wayland_start()
 	}
 
+	zoom, pending_zoom = 1, 1
 	screen_w = f32(rl.GetScreenWidth())
 	screen_h = f32(rl.GetScreenHeight())
 	frame_dt = 1.0 / 60.0
-	loaded_dpi = dpi_scale()
+	loaded_scale = raster_scale()
 
 	input = {}
 
@@ -193,13 +221,16 @@ frame :: proc() -> bool {
 		return false
 	}
 
-	screen_w = f32(rl.GetScreenWidth())
-	screen_h = f32(rl.GetScreenHeight())
+	zoom = fit_zoom(pending_zoom)
+	screen_w = f32(rl.GetScreenWidth()) / zoom
+	screen_h = f32(rl.GetScreenHeight()) / zoom
 	poll_input()
 
-	dpi := dpi_scale()
-	if dpi > 0 && math.abs(dpi - loaded_dpi) > 0.01 && len(fonts) > 0 {
-		loaded_dpi = dpi
+	// A new display scale (moved to another screen) or zoom re-rasterizes
+	// the fonts, so glyphs stay one texel per pixel.
+	scale := raster_scale()
+	if math.abs(scale - loaded_scale) > 0.001 && len(fonts) > 0 {
+		loaded_scale = scale
 		reload_fonts()
 	}
 
@@ -228,6 +259,84 @@ dpi_scale :: proc() -> f32 {
 		return 1
 	}
 	return s
+}
+
+// Pixels per layout unit: the display scale times the zoom.
+raster_scale :: proc() -> f32 {
+	return dpi_scale() * zoom
+}
+
+// Takes effect at the start of the next frame. Clamped to the ZOOM_STEPS
+// range, and a zoom-in that would squeeze the layout below the window's
+// minimum size is refused.
+set_zoom :: proc(z: f32) {
+	z := math.clamp(z, ZOOM_STEPS[0], ZOOM_STEPS[len(ZOOM_STEPS) - 1])
+	if z > pending_zoom && !zoom_fits(z) {
+		return
+	}
+	pending_zoom = z
+}
+
+// The layout at zoom `z` is at least the window's minimum size.
+@(private)
+zoom_fits :: proc(z: f32) -> bool {
+	w, h := f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight())
+	return w / z >= min_size.x && h / z >= min_size.y
+}
+
+// The zoom to use this frame: the largest step at or below `requested` whose
+// layout still fits the minimum size, never below 1 (or `requested`, if that
+// is lower). A window shrunk after zooming in, or tiled smaller by the
+// compositor, steps the zoom down instead of squeezing the layout. Whole steps
+// only, so a resize drag re-rasterizes fonts at step changes, not every frame.
+@(private)
+fit_zoom :: proc(requested: f32) -> f32 {
+	floor := min(requested, 1)
+	if requested <= floor || zoom_fits(requested) {
+		return requested
+	}
+	#reverse for z in ZOOM_STEPS {
+		if z < requested && (z <= floor || zoom_fits(z)) {
+			return max(z, floor)
+		}
+	}
+	return floor
+}
+
+zoom_in :: proc() {
+	for z in ZOOM_STEPS {
+		if z > pending_zoom + 0.001 {
+			set_zoom(z)
+			return
+		}
+	}
+}
+
+zoom_out :: proc() {
+	#reverse for z in ZOOM_STEPS {
+		if z < pending_zoom - 0.001 {
+			set_zoom(z)
+			return
+		}
+	}
+}
+
+// Ctrl + = / - / 0 (Cmd on macOS), keypad too. Shift is allowed, since + is
+// Shift+= on most layouts.
+zoom_shortcuts :: proc() {
+	mod: Mod = .Super when ODIN_OS == .Darwin else .Ctrl
+	if mod not_in input.mods || input.mods - {mod, .Shift} != {} {
+		return
+	}
+	if key_pressed(.Plus) || key_pressed(.KP_Add) {
+		zoom_in()
+	}
+	if key_pressed(.Minus) || key_pressed(.KP_Subtract) {
+		zoom_out()
+	}
+	if key_pressed(.Zero) || key_pressed(.KP_0) {
+		set_zoom(1)
+	}
 }
 
 framebuffer_size :: proc() -> (i32, i32) {
@@ -272,27 +381,60 @@ glyph_font :: proc(id: u16) -> rl.Font {
 // pixel when drawn at `size` in point space. Filter is bilinear with no mips:
 // trilinear mipmaps are what softens UI text.
 load_font :: proc(font_id: u16, size: u16, path: cstring) {
+	f := reset_font_slot(font_id, size)
+	f.path = strings.clone(string(path))
+	f.font = rasterize(f^)
+	loaded_scale = raster_scale()
+}
+
+// Same from TTF/OTF bytes, e.g. `#load("fonts/Inter-Medium.ttf")`, so the
+// binary doesn't depend on the working directory. `data` must outlive the UI.
+load_font_data :: proc(font_id: u16, size: u16, data: []u8) {
+	f := reset_font_slot(font_id, size)
+	f.data = data
+	f.font = rasterize(f^)
+	loaded_scale = raster_scale()
+}
+
+@(private)
+reset_font_slot :: proc(font_id: u16, size: u16) -> ^Font_Slot {
 	ensure_font_slot(font_id)
-	if fonts[font_id].font.glyphCount > 0 {
-		rl.UnloadFont(fonts[font_id].font)
+	f := &fonts[font_id]
+	if f.font.glyphCount > 0 {
+		rl.UnloadFont(f.font)
 	}
-	delete(fonts[font_id].path)
-	fonts[font_id].path = strings.clone(string(path))
-	fonts[font_id].size = size
-	fonts[font_id].font = rasterize(fonts[font_id].path, size)
-	loaded_dpi = dpi_scale()
+	delete(f.path)
+	f^ = {size = size}
+	return f
+}
+
+// The size to draw (and measure) text at, in layout units. The atlas holds
+// glyphs at round(size * raster_scale) pixels; drawing at exactly that many
+// pixels maps one texel to one pixel. Drawing at the nominal size instead
+// resamples every glyph: at a 1.25 display scale 14pt needs 17.5px against an
+// 18px atlas, and the 0.97x minification is what blurred text. So a 14pt
+// label draws at 14.4pt there, and at exactly 14pt at 1x and 2x.
+text_draw_size :: proc(font_id: u16, font_size: u16) -> f32 {
+	if int(font_id) >= len(fonts) {
+		return f32(font_size)
+	}
+	f := fonts[font_id]
+	if f.font.glyphCount <= 0 || f.size == 0 {
+		return f32(font_size)
+	}
+	return f32(font_size) / f32(f.size) * f32(f.font.baseSize) / raster_scale()
 }
 
 @(private)
 reload_fonts :: proc() {
 	for &f in fonts {
-		if f.path == "" {
+		if f.path == "" && len(f.data) == 0 {
 			continue
 		}
 		if f.font.glyphCount > 0 {
 			rl.UnloadFont(f.font)
 		}
-		f.font = rasterize(f.path, f.size)
+		f.font = rasterize(f)
 	}
 }
 
@@ -315,19 +457,24 @@ codepoints :: proc() -> []rune {
 }
 
 @(private)
-rasterize :: proc(path: string, size: u16) -> rl.Font {
-	px := i32(math.round(f32(size) * dpi_scale()))
+rasterize :: proc(slot: Font_Slot) -> rl.Font {
+	px := i32(math.round(f32(slot.size) * raster_scale()))
 	if px < 1 {
-		px = i32(size)
+		px = i32(slot.size)
 	}
-	cstr := strings.clone_to_cstring(path)
-	defer delete(cstr)
 	cps := codepoints()
-	font := rl.LoadFontEx(cstr, px, raw_data(cps), i32(len(cps)))
+	font: rl.Font
+	if len(slot.data) > 0 {
+		font = rl.LoadFontFromMemory(".ttf", raw_data(slot.data), i32(len(slot.data)), px, raw_data(cps), i32(len(cps)))
+	} else {
+		cstr := strings.clone_to_cstring(slot.path)
+		defer delete(cstr)
+		font = rl.LoadFontEx(cstr, px, raw_data(cps), i32(len(cps)))
+	}
 	if font.glyphCount > 0 {
 		rl.SetTextureFilter(font.texture, .BILINEAR)
 	} else {
-		fmt.eprintln("ui: font failed to load:", path)
+		fmt.eprintln("ui: font failed to load:", slot.path if slot.path != "" else "(from memory)")
 	}
 	return font
 }
@@ -368,14 +515,19 @@ end_layout :: proc() -> clay.ClayArray(clay.RenderCommand) {
 	return cmds
 }
 
+// Everything drawn until end_draw, UI and host alike, is in layout units:
+// the zoom is a scale on rlgl's matrix stack.
 begin_draw :: proc() {
 	rl.BeginDrawing()
 	rl.ClearBackground(to_rl_color(theme.bg))
+	rlgl.PushMatrix()
+	rlgl.Scalef(zoom, zoom, 1)
 }
 
 end_draw :: proc() {
 	// Flush first so a present wait is followed by nothing but the swap.
 	rlgl.DrawRenderBatchActive()
+	rlgl.PopMatrix()
 	busy := time.since(frame_start)
 	when ODIN_OS == .Darwin {
 		darwin_present_wait()
@@ -430,12 +582,7 @@ begin_clip :: proc(id: string, index: u32 = 0) -> bool {
 	if !ok {
 		return false
 	}
-	rl.BeginScissorMode(
-		i32(math.round(box.x)),
-		i32(math.round(box.y)),
-		i32(math.round(box.width)),
-		i32(math.round(box.height)),
-	)
+	set_scissor(box)
 	return true
 }
 
@@ -473,6 +620,7 @@ Stats :: struct {
 	cmds:       int,
 	custom:     int,
 	custom_max: int,
+	zoom:       f32,
 }
 
 stats :: proc() -> Stats {
@@ -484,12 +632,12 @@ stats :: proc() -> Stats {
 		cmds       = last_cmd_count,
 		custom     = len(s_custom),
 		custom_max = CUSTOM_RESERVE,
+		zoom       = zoom,
 	}
 }
 
-// Match DrawTextEx: advances from the atlas, scaled by fontSize/baseSize,
-// spacing added once per codepoint. Atlas pixels are `size * dpi`, so the
-// scale lands on 1 texel per framebuffer pixel.
+// Match DrawTextEx: advances from the atlas, scaled by the draw size over
+// baseSize (see text_draw_size), spacing added once per codepoint.
 @(private)
 measure_text :: proc "c" (
 	text: clay.StringSlice,
@@ -522,11 +670,12 @@ measure_text :: proc "c" (
 		spacing += f32(config.letterSpacing)
 		i += w
 	}
+	size := text_draw_size(config.fontId, config.fontSize)
 	scale := f32(1)
 	if font.baseSize != 0 {
-		scale = f32(config.fontSize) / f32(font.baseSize)
+		scale = size / f32(font.baseSize)
 	}
-	return {width = width * scale + spacing, height = f32(config.fontSize)}
+	return {width = width * scale + spacing, height = size}
 }
 
 @(private)
@@ -559,6 +708,11 @@ poll_input :: proc() {
 		if rl.IsMouseButtonReleased(.RIGHT) do input.mouse_released |= 1 << u8(Mouse_Button.Right)
 		if rl.IsMouseButtonReleased(.MIDDLE) do input.mouse_released |= 1 << u8(Mouse_Button.Middle)
 	}
+	// Points to layout units.
+	input.mouse_x /= zoom
+	input.mouse_y /= zoom
+	input.mouse_delta_x /= zoom
+	input.mouse_delta_y /= zoom
 	if took_keys {
 		return
 	}
@@ -590,6 +744,20 @@ poll_input :: proc() {
 	poll_key(.U, .U); poll_key(.V, .V); poll_key(.W, .W); poll_key(.X, .X)
 	poll_key(.Y, .Y); poll_key(.Z, .Z)
 	poll_key(.F1, .F1); poll_key(.F3, .F3)
+	poll_key(.KP_Add, .KP_ADD); poll_key(.KP_Subtract, .KP_SUBTRACT); poll_key(.KP_0, .KP_0)
+
+	// raylib names keys by their US position, so on a German layout + comes
+	// in as RIGHT_BRACKET and - as SLASH. Match these by what they type.
+	for k := rl.GetKeyPressed(); k != .KEY_NULL; k = rl.GetKeyPressed() {
+		switch string(rl.GetKeyName(k)) {
+		case "+", "=":
+			input.keys_pressed += {.Plus}
+		case "-":
+			input.keys_pressed += {.Minus}
+		case "0":
+			input.keys_pressed += {.Zero}
+		}
+	}
 }
 
 @(private)

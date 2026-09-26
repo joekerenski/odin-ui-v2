@@ -1,12 +1,15 @@
 package main
 
-// Spring graph. Nodes repel, edges pull, the panel edits the model.
+// Two tabs under a top bar. Graph: nodes repel, edges pull, the panel edits
+// the model. Showcase: every widget in a scrollable column (showcase.odin).
 //
 //   ./run.sh
-//   ./run.sh --shot     write graph-shot.png after a short run and quit
+//   ./run.sh --shot         write graph-shot.png after a short run and quit
+//   ./run.sh --showcase     start on the Showcase tab
 //
 // Drag a node to pin it under the cursor. Link is a mode: the next node you
-// click is tied to the selection. Esc quits, F toggles fullscreen, space pauses.
+// click is tied to the selection. Esc quits, F toggles fullscreen, space pauses,
+// Ctrl +/-/0 zooms the UI (Cmd on macOS).
 
 import ui "../ui"
 import "core:fmt"
@@ -14,13 +17,26 @@ import "core:math"
 import "core:os"
 import rl "../deps/raylib"
 
-FONT :: "fonts/Inter-Medium.ttf"
+// Embedded, so the binary runs from any directory.
+FONT :: #load("../fonts/Inter-Medium.ttf")
+
+Tab :: enum {
+	Graph,
+	Showcase,
+}
+
+// In Tab order.
+TAB_LABELS := []string{"Graph", "Showcase"}
 
 main :: proc() {
 	shot := false
+	tab := Tab.Graph
 	for a in os.args[1:] {
-		if a == "--shot" {
+		switch a {
+		case "--shot":
 			shot = true
+		case "--showcase":
+			tab = .Showcase
 		}
 	}
 
@@ -28,23 +44,27 @@ main :: proc() {
 	boot(&g)
 	defer shutdown_graph(&g)
 
+	sc := showcase_init()
+
 	ui.theme.gap_md = 8
 	ui.theme.panel_w = 280
 
 	ui.init({
-		title      = "graph",
+		title      = "odin-ui",
 		width      = 1180,
 		height     = 780,
 		resizable  = true,
 		high_dpi   = true,
 		msaa_4x    = true,
 		target_fps = 60,
+		min_width  = 720,
+		min_height = 480,
 	})
 	defer ui.shutdown()
 
-	ui.load_font(ui.theme.font_title, ui.theme.size_title, FONT)
-	ui.load_font(ui.theme.font_body, ui.theme.size_body, FONT)
-	ui.load_font(ui.theme.font_small, ui.theme.size_small, FONT)
+	ui.load_font_data(ui.theme.font_title, ui.theme.size_title, FONT)
+	ui.load_font_data(ui.theme.font_body, ui.theme.size_body, FONT)
+	ui.load_font_data(ui.theme.font_small, ui.theme.size_small, FONT)
 
 	drag_id := -1
 	frame_n := 0
@@ -61,62 +81,41 @@ main :: proc() {
 		if ui.key_pressed_bare(.F) {
 			ui.toggle_fullscreen()
 		}
-		if ui.key_pressed_bare(.Space) {
-			g.paused = !g.paused
-		}
-		if ui.key_pressed_bare(.N) {
-			sprout(&g)
-		}
-		if ui.key_pressed_bare(.Backspace) || ui.key_pressed_bare(.Delete) {
-			if g.selected >= 0 {
-				delete_node(&g, g.selected)
-				drag_id = -1
-			}
-		}
-
-		panel, panel_ok := ui.region("Panel")
-		over_ui := panel_ok && ui.mouse_in_box(panel)
-		canvas, canvas_ok := ui.region("Canvas")
-		world := [2]f32{}
-		if canvas_ok {
-			world = screen_to_world(canvas, ui.input.mouse_x, ui.input.mouse_y)
-		}
-
-		if drag_id >= 0 {
-			if ui.mouse_down() {
-				if idx := find_node(&g, drag_id); idx >= 0 {
-					g.nodes[idx].pos = world
-					dt := math.max(ui.frame_dt, 1.0 / 1000)
-					g.nodes[idx].vel = {ui.input.mouse_delta_x / dt, ui.input.mouse_delta_y / dt}
-				}
-			} else {
-				drag_id = -1
-			}
-		} else if !over_ui && canvas_ok && ui.mouse_pressed() {
-			hit := node_at(&g, world)
-			if hit >= 0 && g.linking && g.selected >= 0 && hit != g.selected {
-				add_edge(&g, g.selected, hit)
-				g.selected = hit
-			} else if hit >= 0 {
-				g.selected = hit
-				drag_id = hit
-				if idx := find_node(&g, hit); idx >= 0 {
-					g.nodes[idx].vel = {}
-				}
-			} else {
-				g.selected = -1
-			}
+		ui.zoom_shortcuts()
+		if tab == .Graph {
+			graph_input(&g, &drag_id)
+		} else {
+			drag_id = -1
 		}
 
 		step(&g, ui.frame_dt)
 
+		// The layout is built for this tab; a click on the tab bar switches
+		// from the next frame on.
+		shown := tab
 		ui.begin_layout()
-		build_panel(&g)
+		if ui.root_begin("Root", true, .TopToBottom) {
+			if ui.top_bar_begin() {
+				ui.body("odin-ui", ui.theme.text_dim)
+				tab = Tab(ui.tab_bar("Tabs", TAB_LABELS, int(tab)))
+				ui.element_end()
+			}
+			if ui.row_begin("Body", {grow_h = true}) {
+				switch shown {
+				case .Graph:
+					build_panel(&g)
+				case .Showcase:
+					build_showcase(&sc)
+				}
+				ui.element_end()
+			}
+			ui.element_end()
+		}
 		ui.debug_strip()
 		cmds := ui.end_layout()
 
 		ui.begin_draw()
-		if ui.begin_clip("Canvas") {
+		if shown == .Graph && ui.begin_clip("Canvas") {
 			draw_graph(&g)
 			ui.end_clip()
 		}
@@ -131,6 +130,55 @@ main :: proc() {
 	}
 }
 
+// Keys and mouse for the Graph tab: shortcuts, node picking, dragging, linking.
+@(private)
+graph_input :: proc(g: ^Graph, drag_id: ^int) {
+	if ui.key_pressed_bare(.Space) {
+		g.paused = !g.paused
+	}
+	if ui.key_pressed_bare(.N) {
+		sprout(g)
+	}
+	if ui.key_pressed_bare(.Backspace) || ui.key_pressed_bare(.Delete) {
+		if g.selected >= 0 {
+			delete_node(g, g.selected)
+			drag_id^ = -1
+		}
+	}
+
+	canvas, canvas_ok := ui.region("Canvas")
+	world := [2]f32{}
+	if canvas_ok {
+		world = screen_to_world(canvas, ui.input.mouse_x, ui.input.mouse_y)
+	}
+
+	if drag_id^ >= 0 {
+			if ui.mouse_down() {
+				if idx := find_node(g, drag_id^); idx >= 0 {
+				g.nodes[idx].pos = world
+				dt := math.max(ui.frame_dt, 1.0 / 1000)
+				g.nodes[idx].vel = {ui.input.mouse_delta_x / dt, ui.input.mouse_delta_y / dt}
+			}
+		} else {
+			drag_id^ = -1
+		}
+	} else if canvas_ok && ui.mouse_in_box(canvas) && ui.mouse_pressed() {
+		hit := node_at(g, world)
+		if hit >= 0 && g.linking && g.selected >= 0 && hit != g.selected {
+			add_edge(g, g.selected, hit)
+			g.selected = hit
+		} else if hit >= 0 {
+			g.selected = hit
+			drag_id^ = hit
+			if idx := find_node(g, hit); idx >= 0 {
+				g.nodes[idx].vel = {}
+			}
+		} else {
+			g.selected = -1
+		}
+	}
+}
+
 @(private)
 screen_to_world :: proc(canvas: ui.Region_Box, x, y: f32) -> [2]f32 {
 	cx := canvas.x + canvas.width * 0.5
@@ -140,48 +188,45 @@ screen_to_world :: proc(canvas: ui.Region_Box, x, y: f32) -> [2]f32 {
 
 @(private)
 build_panel :: proc(g: ^Graph) {
-	if ui.root_begin("Root", true) {
-		if ui.panel_begin("Panel") {
-			ui.title("Graph")
-			ui.dim("springs, repulsion, a little gravity")
-			ui.divider("div0")
+	if ui.panel_begin("Panel") {
+		ui.title("Graph")
+		ui.dim("springs, repulsion, a little gravity")
+		ui.divider("div0")
 
-			ui.section("SIM")
-			g.paused = ui.toggle("pause", g.paused ? "PAUSE" : "RUNNING", g.paused)
-			g.spring = ui.slider("spring", "Spring", g.spring, 0, 40, "%.1f")
-			g.rest = ui.slider("rest", "Rest length", g.rest, 40, 280, "%.0f")
-			g.repulsion = ui.slider("repulse", "Repulsion", g.repulsion, 0, 600_000, "%.0f")
-			g.damping = ui.slider("damp", "Damping", g.damping, 0, 12, "%.1f")
-			g.gravity = ui.slider("grav", "Gravity", g.gravity, 0, 6, "%.1f")
+		ui.section("SIM")
+		g.paused = ui.toggle("pause", g.paused ? "PAUSE" : "RUNNING", g.paused)
+		g.spring = ui.slider("spring", "Spring", g.spring, 0, 40, "%.1f")
+		g.rest = ui.slider("rest", "Rest length", g.rest, 40, 280, "%.0f")
+		g.repulsion = ui.slider("repulse", "Repulsion", g.repulsion, 0, 600_000, "%.0f")
+		g.damping = ui.slider("damp", "Damping", g.damping, 0, 12, "%.1f")
+		g.gravity = ui.slider("grav", "Gravity", g.gravity, 0, 6, "%.1f")
 
-			ui.section("EDIT")
-			if ui.button("add", "Add node", {accent = true}) {
-				sprout(g)
-			}
-			g.linking = ui.toggle("link", g.linking ? "LINKING" : "LINK OFF", g.linking)
-			if ui.button("del", "Delete selected") {
-				if g.selected >= 0 {
-					delete_node(g, g.selected)
-				}
-			}
-			if ui.button("reset", "Reset") {
-				reset(g)
-			}
-
-			ui.divider("div1")
-			ui.dim(fmt.tprintf("%d nodes   %d edges", len(g.nodes), len(g.edges)))
-			if g.selected >= 0 {
-				ui.body(fmt.tprintf("selected %d", g.selected))
-			} else {
-				ui.dim("click a node")
-			}
-			ui.dim("N add   bksp delete   space pause   F fullscreen")
-			ui.element_end()
+		ui.section("EDIT")
+		if ui.button("add", "Add node", {accent = true}) {
+			sprout(g)
 		}
-		ui.canvas_begin("Canvas", {0, 0, 0, 0})
-		ui.element_end()
-		ui.element_end()
+		g.linking = ui.toggle("link", g.linking ? "LINKING" : "LINK OFF", g.linking)
+		if ui.button("del", "Delete selected") {
+			if g.selected >= 0 {
+				delete_node(g, g.selected)
+			}
+		}
+		if ui.button("reset", "Reset") {
+			reset(g)
+		}
+
+		ui.divider("div1")
+		ui.dim(fmt.tprintf("%d nodes   %d edges", len(g.nodes), len(g.edges)))
+		if g.selected >= 0 {
+			ui.body(fmt.tprintf("selected %d", g.selected))
+		} else {
+			ui.dim("click a node")
+		}
+		ui.dim("N add   bksp delete   space pause   F fullscreen")
+		ui.panel_end("Panel")
 	}
+	ui.canvas_begin("Canvas", {0, 0, 0, 0})
+	ui.element_end()
 }
 
 @(private)
@@ -215,7 +260,7 @@ draw_graph :: proc(g: ^Graph) {
 		}
 		if font.glyphCount > 0 {
 			label := fmt.ctprintf("%d", n.id)
-			size := f32(ui.theme.size_small)
+			size := ui.text_draw_size(ui.theme.font_small, ui.theme.size_small)
 			ts := rl.MeasureTextEx(font, label, size, 0)
 			pos := [2]f32{ui.snap_px(p.x - ts.x * 0.5), ui.snap_px(p.y - ts.y * 0.5)}
 			rl.DrawTextEx(font, label, pos, size, 0, ui.to_rl_color(ui.theme.text))
