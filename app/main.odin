@@ -55,16 +55,17 @@ main :: proc() {
 			ui.request_quit()
 			break
 		}
-		if ui.key_pressed(.F) {
+		// Bare keys only: Cmd+N and friends belong to the system.
+		if ui.key_pressed_bare(.F) {
 			ui.toggle_fullscreen()
 		}
-		if ui.key_pressed(.Space) {
+		if ui.key_pressed_bare(.Space) {
 			g.paused = !g.paused
 		}
-		if ui.key_pressed(.N) {
+		if ui.key_pressed_bare(.N) {
 			sprout(&g)
 		}
-		if ui.key_pressed(.Backspace) || ui.key_pressed(.Delete) {
+		if ui.key_pressed_bare(.Backspace) || ui.key_pressed_bare(.Delete) {
 			if g.selected >= 0 {
 				delete_node(&g, g.selected)
 				drag_id = -1
@@ -214,7 +215,8 @@ draw_graph :: proc(g: ^Graph) {
 			label := fmt.ctprintf("%d", n.id)
 			size := f32(ui.theme.size_small)
 			ts := rl.MeasureTextEx(font, label, size, 0)
-			rl.DrawTextEx(font, label, {p.x - ts.x * 0.5, p.y - ts.y * 0.5}, size, 0, ui.to_rl_color(ui.theme.text))
+			pos := [2]f32{ui.snap_px(p.x - ts.x * 0.5), ui.snap_px(p.y - ts.y * 0.5)}
+			rl.DrawTextEx(font, label, pos, size, 0, ui.to_rl_color(ui.theme.text))
 		}
 	}
 }

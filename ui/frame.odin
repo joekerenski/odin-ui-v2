@@ -144,6 +144,8 @@ shutdown :: proc() {
 	}
 	delete(fonts)
 	fonts = nil
+	delete(font_codepoints)
+	font_codepoints = nil
 	custom_teardown()
 	delete(clay_memory)
 	clay_memory = nil
@@ -181,7 +183,8 @@ frame :: proc() -> bool {
 		reload_fonts()
 	}
 
-	if frame_dt > 0 && fps_acc < 0.5 {
+	// One-frame rate until the first half-second average exists.
+	if shown_fps == 0 && frame_dt > 0 {
 		shown_fps = i32(math.round(1.0 / frame_dt))
 	}
 	fps_acc += frame_dt
@@ -262,6 +265,24 @@ reload_fonts :: proc() {
 	}
 }
 
+// ASCII, Latin-1, and the punctuation and symbols UI text tends to use.
+// Anything outside this set, or missing from the font file, draws as '?'
+// (raylib logs how many were found).
+@(private)
+font_codepoints: [dynamic]rune
+
+@(private)
+codepoints :: proc() -> []rune {
+	if len(font_codepoints) == 0 {
+		for r in rune(32) ..= 126 do append(&font_codepoints, r)
+		for r in rune(160) ..= 255 do append(&font_codepoints, r)
+		append(&font_codepoints,
+			'–', '—', '‘', '’', '“', '”', '•', '…', '€',
+			'←', '↑', '→', '↓', '−', '≤', '≥', '✓', '✕')
+	}
+	return font_codepoints[:]
+}
+
 @(private)
 rasterize :: proc(path: string, size: u16) -> rl.Font {
 	px := i32(math.round(f32(size) * dpi_scale()))
@@ -270,7 +291,8 @@ rasterize :: proc(path: string, size: u16) -> rl.Font {
 	}
 	cstr := strings.clone_to_cstring(path)
 	defer delete(cstr)
-	font := rl.LoadFontEx(cstr, px, nil, 0)
+	cps := codepoints()
+	font := rl.LoadFontEx(cstr, px, raw_data(cps), i32(len(cps)))
 	if font.glyphCount > 0 {
 		rl.SetTextureFilter(font.texture, .BILINEAR)
 	} else {
@@ -289,7 +311,7 @@ ensure_font_slot :: proc(id: u16) {
 @(private)
 clay_error :: proc "c" (data: clay.ErrorData) {
 	context = runtime.default_context()
-	fmt.eprintln("clay:", data.errorType)
+	fmt.eprintln("clay:", data.errorType, string(data.errorText.chars[:data.errorText.length]))
 }
 
 @(private)
@@ -379,7 +401,6 @@ begin_clip :: proc(id: string, index: u32 = 0) -> bool {
 
 end_clip :: proc() {
 	rl.EndScissorMode()
-	rlgl.DisableScissorTest()
 }
 
 element_hovered :: proc(id: string, index: u32 = 0) -> bool {
@@ -441,7 +462,7 @@ measure_text :: proc "c" (
 	}
 	font := fonts[config.fontId].font
 	s := string(text.chars[:text.length])
-	width: f32
+	width, spacing: f32
 	i := 0
 	for i < len(s) {
 		r, w := utf8.decode_rune_in_string(s[i:])
@@ -454,17 +475,18 @@ measure_text :: proc "c" (
 			if g.advanceX != 0 {
 				width += f32(g.advanceX)
 			} else {
-				width += font.recs[idx].width + f32(g.offsetX)
+				width += font.recs[idx].width
 			}
 		}
-		width += f32(config.letterSpacing)
+		// DrawTextEx adds spacing in points, outside the glyph scale.
+		spacing += f32(config.letterSpacing)
 		i += w
 	}
-	scale := f32(config.fontSize) / f32(font.baseSize)
-	if font.baseSize == 0 {
-		scale = 1
+	scale := f32(1)
+	if font.baseSize != 0 {
+		scale = f32(config.fontSize) / f32(font.baseSize)
 	}
-	return {width = width * scale, height = f32(config.fontSize)}
+	return {width = width * scale + spacing, height = f32(config.fontSize)}
 }
 
 @(private)

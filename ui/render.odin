@@ -22,12 +22,14 @@ draw_triangle :: proc(a, b, c: [2]f32, color: Color) {
 	rl.DrawTriangle({a.x, a.y}, {b.x, b.y}, {c.x, c.y}, to_rl_color(color))
 }
 
-@(private)
+// Round a point-space coordinate onto the physical pixel grid.
 snap_px :: proc(v: f32) -> f32 {
 	s := dpi_scale()
 	return math.round(v * s) / s
 }
 
+// The stack holds each overlay already multiplied into its parents, so the
+// top is the whole effect.
 @(private)
 apply_overlay :: proc(color: Color, overlay: [dynamic]Color) -> Color {
 	if len(overlay) == 0 {
@@ -45,8 +47,21 @@ apply_overlay :: proc(color: Color, overlay: [dynamic]Color) -> Color {
 	}
 }
 
+@(private)
+set_scissor :: proc(b: clay.BoundingBox) {
+	rl.BeginScissorMode(
+		i32(math.round(b.x)),
+		i32(math.round(b.y)),
+		i32(math.round(b.width)),
+		i32(math.round(b.height)),
+	)
+}
+
+// Clip boxes nest: each is intersected with its parent, and closing one
+// restores the parent instead of turning clipping off.
 render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := context.temp_allocator) {
 	overlay := make([dynamic]Color, allocator)
+	clips := make([dynamic]clay.BoundingBox, allocator)
 	for i in 0 ..< commands.length {
 		cmd := clay.RenderCommandArray_Get(commands, i32(i))
 		b := cmd.boundingBox
@@ -78,14 +93,24 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 			}
 			rl.DrawTextureEx(tex^, {b.x, b.y}, 0, b.width / f32(tex.width), to_rl_color(tint))
 		case .ScissorStart:
-			rl.BeginScissorMode(
-				i32(math.round(b.x)),
-				i32(math.round(b.y)),
-				i32(math.round(b.width)),
-				i32(math.round(b.height)),
-			)
+			r := b
+			if len(clips) > 0 {
+				p := clips[len(clips) - 1]
+				x0, y0 := max(r.x, p.x), max(r.y, p.y)
+				x1, y1 := min(r.x + r.width, p.x + p.width), min(r.y + r.height, p.y + p.height)
+				r = {x0, y0, max(0, x1 - x0), max(0, y1 - y0)}
+			}
+			append(&clips, r)
+			set_scissor(r)
 		case .ScissorEnd:
-			rl.EndScissorMode()
+			if len(clips) > 0 {
+				pop(&clips)
+			}
+			if len(clips) > 0 {
+				set_scissor(clips[len(clips) - 1])
+			} else {
+				rl.EndScissorMode()
+			}
 		case .Rectangle:
 			config := cmd.renderData.rectangle
 			draw_round_rect(b, config.cornerRadius, apply_overlay(config.backgroundColor, overlay))
@@ -93,7 +118,12 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 			config := cmd.renderData.border
 			draw_border(b, config, apply_overlay(config.color, overlay))
 		case .OverlayColorStart:
-			append(&overlay, cmd.renderData.overlayColor.color)
+			c := cmd.renderData.overlayColor.color
+			if len(overlay) > 0 {
+				p := overlay[len(overlay) - 1]
+				c = {c[0] * p[0] / 255, c[1] * p[1] / 255, c[2] * p[2] / 255, c[3] * p[3] / 255}
+			}
+			append(&overlay, c)
 		case .OverlayColorEnd:
 			if len(overlay) > 0 {
 				pop(&overlay)

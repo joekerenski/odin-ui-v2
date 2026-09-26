@@ -66,7 +66,6 @@ reset :: proc(g: ^Graph) {
 		if i > 0 {
 			add_edge(g, id - 1, id)
 		}
-		_ = id
 	}
 	add_edge(g, 0, n - 1)
 	add_edge(g, 0, 3)
@@ -149,8 +148,7 @@ step :: proc(g: ^Graph, dt: f32) {
 @(private)
 step_once :: proc(g: ^Graph, dt: f32) {
 	n := len(g.nodes)
-	force := make([][2]f32, n)
-	defer delete(force)
+	force := make([][2]f32, n, context.temp_allocator)
 
 	for i in 0 ..< n {
 		for j in i + 1 ..< n {
