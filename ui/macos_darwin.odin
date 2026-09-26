@@ -25,7 +25,7 @@ import "base:runtime"
 import "core:c"
 import "core:thread"
 import Foundation "core:sys/darwin/Foundation"
-import rl "vendor:raylib"
+import rl "../deps/raylib"
 
 foreign import objc_runtime "system:objc"
 foreign objc_runtime {

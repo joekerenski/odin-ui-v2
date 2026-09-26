@@ -3,8 +3,8 @@ package ui
 import clay "../deps/clay"
 import "core:math"
 import "core:strings"
-import rl "vendor:raylib"
-import rlgl "vendor:raylib/rlgl"
+import rl "../deps/raylib"
+import rlgl "../deps/raylib/rlgl"
 
 // Clay render commands to raylib. Text quads are snapped onto the physical
 // pixel grid. Filled rects use raylib's rounded-rect path (uniform corners,

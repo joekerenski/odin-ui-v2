@@ -8,8 +8,8 @@ import "core:math"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
-import rl "vendor:raylib"
-import rlgl "vendor:raylib/rlgl"
+import rl "../deps/raylib"
+import rlgl "../deps/raylib/rlgl"
 
 Region_Box :: clay.BoundingBox
 
@@ -35,6 +35,10 @@ Region_Box :: clay.BoundingBox
 // interval 0); the view's display link is the clock. Fullscreen on an
 // adaptive-refresh screen runs on a deadline grid instead, with a second wait
 // in `end_draw` that holds the swap for its slot. See macos_darwin.odin.
+//
+// On Wayland the clock is the surface's frame callback, the same shape: swap
+// interval 0, `frame` waits for the callback and then polls. See
+// wayland_linux.odin. Under X11 it is raylib's loop with vsync.
 
 Window_Desc :: struct {
 	title:      cstring,
@@ -118,6 +122,8 @@ init :: proc(desc: Window_Desc) {
 
 	when ODIN_OS == .Darwin {
 		darwin_start()
+	} else when ODIN_OS == .Linux {
+		wayland_start()
 	}
 
 	screen_w = f32(rl.GetScreenWidth())
@@ -135,6 +141,8 @@ init :: proc(desc: Window_Desc) {
 shutdown :: proc() {
 	when ODIN_OS == .Darwin {
 		darwin_stop()
+	} else when ODIN_OS == .Linux {
+		wayland_stop()
 	}
 	for &f in fonts {
 		if f.font.glyphCount > 0 {
@@ -162,6 +170,18 @@ frame :: proc() -> bool {
 		darwin_pace()
 		frame_start = time.now()
 		rl.PollInputEvents()
+	} else when ODIN_OS == .Linux {
+		if wayland_active() {
+			wayland_pace()
+			frame_start = time.now()
+			rl.PollInputEvents()
+		} else {
+			frame_dt = rl.GetFrameTime()
+			if frame_dt <= 0 {
+				frame_dt = 1.0 / 60.0
+			}
+			frame_start = time.now()
+		}
 	} else {
 		frame_dt = rl.GetFrameTime()
 		if frame_dt <= 0 {
@@ -217,6 +237,12 @@ framebuffer_size :: proc() -> (i32, i32) {
 toggle_fullscreen :: proc() {
 	when ODIN_OS == .Darwin {
 		darwin_toggle_fullscreen()
+	} else when ODIN_OS == .Linux {
+		if wayland_active() {
+			wayland_toggle_fullscreen()
+		} else {
+			rl.ToggleFullscreen()
+		}
 	} else {
 		rl.ToggleFullscreen()
 	}
@@ -225,6 +251,11 @@ toggle_fullscreen :: proc() {
 is_fullscreen :: proc() -> bool {
 	when ODIN_OS == .Darwin {
 		return darwin_is_fullscreen()
+	} else when ODIN_OS == .Linux {
+		if wayland_active() {
+			return wayland_is_fullscreen()
+		}
+		return rl.IsWindowFullscreen()
 	} else {
 		return rl.IsWindowFullscreen()
 	}
@@ -352,6 +383,15 @@ end_draw :: proc() {
 		// poll in `frame` would eat raylib's key-press edges.
 		swap_start := time.now()
 		rl.SwapScreenBuffer()
+	} else when ODIN_OS == .Linux {
+		swap_start := time.now()
+		if wayland_active() {
+			// Same reason as macOS: `frame` polls after the wait.
+			wayland_request_frame()
+			rl.SwapScreenBuffer()
+		} else {
+			rl.EndDrawing()
+		}
 	} else {
 		swap_start := time.now()
 		rl.EndDrawing()

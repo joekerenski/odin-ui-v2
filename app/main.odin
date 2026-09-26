@@ -12,7 +12,7 @@ import ui "../ui"
 import "core:fmt"
 import "core:math"
 import "core:os"
-import rl "vendor:raylib"
+import rl "../deps/raylib"
 
 FONT :: "fonts/Inter-Medium.ttf"
 

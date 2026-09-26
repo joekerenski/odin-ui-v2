@@ -4,3 +4,4 @@ graph-shot.png
 .DS_Store
 *.log
 fonts/Regulator-Nova-Medium.ttf
+/*.o
