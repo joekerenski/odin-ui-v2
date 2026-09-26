@@ -3,7 +3,7 @@ package main
 // Spring graph. Nodes repel, edges pull, the panel edits the model.
 //
 //   ./run.sh
-//   ./run.sh --shot     write /tmp/graph-shot.png after a short run and quit
+//   ./run.sh --shot     write graph-shot.png after a short run and quit
 //
 // Drag a node to pin it under the cursor. Link is a mode: the next node you
 // click is tied to the selection. Esc quits, F toggles fullscreen, space pauses.
@@ -13,7 +13,6 @@ import "core:fmt"
 import "core:math"
 import "core:os"
 import rl "vendor:raylib"
-import rlgl "vendor:raylib/rlgl"
 
 main :: proc() {
 	shot := false
@@ -120,8 +119,7 @@ main :: proc() {
 		}
 		ui.render(&cmds)
 		if shot && frame_n == 24 {
-			rlgl.DrawRenderBatchActive()
-			rl.TakeScreenshot("graph-shot.png")
+			ui.screenshot("graph-shot.png")
 		}
 		ui.end_draw()
 		if shot && frame_n == 24 {

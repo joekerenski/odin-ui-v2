@@ -35,27 +35,30 @@ hovered :: proc(id: string, index: u32 = 0) -> bool {
 
 // True while LMB is held over the element, or while a drag started on it.
 dragging :: proc(id: string) -> bool {
-	return _drag_id == id && mouse_down(.Left)
+	return _drag_id != 0 && _drag_id == clay.ID(id).id && mouse_down(.Left)
 }
 
 // --- drag state (single active drag; one mouse) -----------------------------
 
+// Clay's hash of the id, not the string: ids built with tprintf live in the
+// temp allocator, which the host frees every frame.
 @(private)
-_drag_id: string
+_drag_id: u32
 
 // Call once per interactive control during build. Starts a drag on press-in-box,
 // clears on release. Returns true while this id owns the drag.
 drag_update :: proc(id: string) -> bool {
+	hash := clay.ID(id).id
 	box, ok := element_box(id)
-	if mouse_released(.Left) && _drag_id == id {
-		_drag_id = ""
+	if mouse_released(.Left) && _drag_id == hash {
+		_drag_id = 0
 	}
-	if _drag_id == "" && mouse_pressed(.Left) && ok && mouse_in_box(box) {
+	if _drag_id == 0 && mouse_pressed(.Left) && ok && mouse_in_box(box) {
 		if s_interactions_enabled {
-			_drag_id = id
+			_drag_id = hash
 		}
 	}
-	return _drag_id == id && mouse_down(.Left)
+	return _drag_id == hash && mouse_down(.Left)
 }
 
 // Map mouse X across `id`'s box to [lo, hi]. No-op when not dragging this id.

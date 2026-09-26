@@ -104,9 +104,9 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 	}
 }
 
-// DrawRectangle emits GL quads, which this 4.1 context does not rasterize.
-// Triangles do, but only if they sample the white shapes texel — an unset
-// texcoord reads the font atlas and the fill disappears.
+// Fills are rlgl triangles on the 1x1 white texture with an explicit texcoord,
+// so they never sample whatever atlas was bound last. Rounded corners are
+// triangle fans, which is why this path exists instead of DrawRectangle.
 @(private)
 fill_begin :: proc(c: rl.Color) {
 	rlgl.SetTexture(shapes_tex.id)

@@ -1,7 +1,7 @@
 package ui
 
 // macOS extras on top of raylib/GLFW:
-//   - NSEvent monitor so a tap that lands inside one poll is still a click
+//   - NSEvent monitor so a click or key tap inside one poll still counts
 //   - Spaces fullscreen (toggleFullScreen:) so the Retina backing scale stays
 //   - the view's display link as the frame clock, with swap interval left at 0
 //   - a fixed present deadline in fullscreen on adaptive-refresh screens
@@ -95,11 +95,16 @@ s_monitor_active: bool
 s_ev_x, s_ev_y, s_ev_dx, s_ev_dy, s_ev_wheel_x, s_ev_wheel_y: f32
 @(private)
 s_ev_down, s_ev_pressed, s_ev_released: u8
+@(private)
+s_key_down, s_key_pressed: bit_set[Key]
+@(private)
+s_key_mods: bit_set[Mod]
 
 EV_LEFT_DOWN, EV_LEFT_UP :: 1, 2
 EV_RIGHT_DOWN, EV_RIGHT_UP :: 3, 4
 EV_MOUSE_MOVED :: 5
 EV_LEFT_DRAGGED, EV_RIGHT_DRAGGED :: 6, 7
+EV_KEY_DOWN, EV_KEY_UP, EV_FLAGS_CHANGED :: 10, 11, 12
 EV_SCROLL_WHEEL :: 22
 EV_OTHER_DOWN, EV_OTHER_UP, EV_OTHER_DRAGGED :: 25, 26, 27
 
@@ -132,8 +137,79 @@ input_monitor_invoke :: proc "c" (block: rawptr, event: rawptr) -> rawptr {
 		}
 		s_ev_wheel_x += f32(dx)
 		s_ev_wheel_y += f32(dy)
+	case EV_KEY_DOWN:
+		if k := key_from_code(intrinsics.objc_send(u16, obj, "keyCode")); k != .Unknown {
+			s_key_down += {k}
+			// Auto-repeat is not a new press, same as raylib's IsKeyPressed.
+			if !intrinsics.objc_send(bool, obj, "isARepeat") {
+				s_key_pressed += {k}
+			}
+		}
+		s_key_mods = mods_from_flags(intrinsics.objc_send(uint, obj, "modifierFlags"))
+	case EV_KEY_UP:
+		if k := key_from_code(intrinsics.objc_send(u16, obj, "keyCode")); k != .Unknown {
+			s_key_down -= {k}
+		}
+		s_key_mods = mods_from_flags(intrinsics.objc_send(uint, obj, "modifierFlags"))
+	case EV_FLAGS_CHANGED:
+		s_key_mods = mods_from_flags(intrinsics.objc_send(uint, obj, "modifierFlags"))
 	}
 	return event
+}
+
+@(private)
+mods_from_flags :: proc(flags: uint) -> (mods: bit_set[Mod]) {
+	if flags & (1 << 17) != 0 do mods += {.Shift}
+	if flags & (1 << 18) != 0 do mods += {.Ctrl}
+	if flags & (1 << 19) != 0 do mods += {.Alt}
+	if flags & (1 << 20) != 0 do mods += {.Super}
+	return
+}
+
+// kVK_* virtual key codes: physical positions on an ANSI layout, as GLFW uses.
+@(private)
+key_from_code :: proc(code: u16) -> Key {
+	switch code {
+	case 0x35: return .Escape
+	case 0x24, 0x4C: return .Enter
+	case 0x31: return .Space
+	case 0x30: return .Tab
+	case 0x33: return .Backspace
+	case 0x75: return .Delete
+	case 0x7B: return .Left
+	case 0x7C: return .Right
+	case 0x7E: return .Up
+	case 0x7D: return .Down
+	case 0x00: return .A
+	case 0x0B: return .B
+	case 0x08: return .C
+	case 0x02: return .D
+	case 0x0E: return .E
+	case 0x03: return .F
+	case 0x05: return .G
+	case 0x04: return .H
+	case 0x22: return .I
+	case 0x26: return .J
+	case 0x28: return .K
+	case 0x25: return .L
+	case 0x2E: return .M
+	case 0x2D: return .N
+	case 0x1F: return .O
+	case 0x23: return .P
+	case 0x0C: return .Q
+	case 0x0F: return .R
+	case 0x01: return .S
+	case 0x11: return .T
+	case 0x20: return .U
+	case 0x09: return .V
+	case 0x0D: return .W
+	case 0x07: return .X
+	case 0x10: return .Y
+	case 0x06: return .Z
+	case 0x7A: return .F1
+	case 0x63: return .F3
+	}
+	return .Unknown
 }
 
 @(private)
@@ -162,7 +238,7 @@ install_input_monitor :: proc() {
 		1 << EV_LEFT_DOWN | 1 << EV_LEFT_UP | 1 << EV_RIGHT_DOWN | 1 << EV_RIGHT_UP |
 		1 << EV_OTHER_DOWN | 1 << EV_OTHER_UP | 1 << EV_MOUSE_MOVED |
 		1 << EV_LEFT_DRAGGED | 1 << EV_RIGHT_DRAGGED | 1 << EV_OTHER_DRAGGED |
-		1 << EV_SCROLL_WHEEL)
+		1 << EV_SCROLL_WHEEL | 1 << EV_KEY_DOWN | 1 << EV_KEY_UP | 1 << EV_FLAGS_CHANGED)
 	s_monitor_token = intrinsics.objc_send(rawptr, cls, "addLocalMonitorForEventsMatchingMask:handler:", mask, &s_monitor_block)
 	s_monitor_active = s_monitor_token != nil
 }
@@ -196,6 +272,24 @@ darwin_take_mouse :: proc() -> bool {
 	s_ev_dx, s_ev_dy = 0, 0
 	s_ev_wheel_x, s_ev_wheel_y = 0, 0
 	s_ev_pressed, s_ev_released = 0, 0
+	return true
+}
+
+// Same for keys. A key released while the window was not key never sends its
+// key-up here, so held state is dropped whenever the window loses focus.
+darwin_take_keys :: proc() -> bool {
+	if !s_monitor_active {
+		return false
+	}
+	win := cast(^Foundation.Object)rl.GetWindowHandle()
+	if win != nil && !intrinsics.objc_send(bool, win, "isKeyWindow") {
+		s_key_down = {}
+		s_key_mods = {}
+	}
+	input.keys_pressed = s_key_pressed
+	input.keys_down = s_key_down
+	input.mods = s_key_mods
+	s_key_pressed = {}
 	return true
 }
 

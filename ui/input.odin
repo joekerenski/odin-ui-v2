@@ -2,8 +2,9 @@ package ui
 
 import clay "../deps/clay"
 
-// Per-frame input. Widgets read this. On macOS the mouse fields are filled
-// from an NSEvent monitor so a press and release inside one poll still count.
+// Per-frame input. Widgets read this. On macOS the mouse and key fields are
+// filled from an NSEvent monitor so a press and release inside one poll still
+// count.
 
 Input :: struct {
 	mouse_x, mouse_y:           f32,
@@ -13,8 +14,16 @@ Input :: struct {
 	mouse_down:     u8,
 	mouse_pressed:  u8,
 	mouse_released: u8,
-	keys_pressed:   map[Key]bool,
-	keys_down:      map[Key]bool,
+	keys_pressed:   bit_set[Key],
+	keys_down:      bit_set[Key],
+	mods:           bit_set[Mod],
+}
+
+Mod :: enum u8 {
+	Shift,
+	Ctrl,
+	Alt,
+	Super, // Cmd on macOS
 }
 
 input: Input
@@ -47,11 +56,16 @@ mouse_released :: proc(b: Mouse_Button = .Left) -> bool {
 }
 
 key_pressed :: proc(k: Key) -> bool {
-	return k in input.keys_pressed && input.keys_pressed[k]
+	return k in input.keys_pressed
 }
 
 key_down :: proc(k: Key) -> bool {
-	return k in input.keys_down && input.keys_down[k]
+	return k in input.keys_down
+}
+
+// A press with no modifiers held: a bare shortcut, not Cmd+N.
+key_pressed_bare :: proc(k: Key) -> bool {
+	return k in input.keys_pressed && input.mods == {}
 }
 
 point_in_box :: proc(px, py: f32, box: clay.BoundingBox) -> bool {

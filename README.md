@@ -14,7 +14,7 @@ Drag a node. **Link** then click another node to tie it to the selection. **N** 
 
 Raylib on its own misses fast trackpad clicks, blurs fullscreen on Retina, and does not lock to ProMotion. This package patches those without forking raylib:
 
-- An `NSEvent` monitor records every mouse edge, then hands the event to GLFW unchanged.
+- An `NSEvent` monitor records every mouse and key edge, then hands the event to GLFW unchanged. Raylib compares key state between polls, so a tap that starts and ends inside one frame never reads as pressed; the monitor keeps it.
 - Fullscreen is `[NSWindow toggleFullScreen:]`, so the 2x backing store stays. `ToggleFullscreen` is the path that drops the scale to 1x.
 - Swap interval stays off. The window view's display link (`NSView.displayLink`, macOS 14+) runs on its own thread; each tick bumps a counter and signals a semaphore, and the frame blocks until the counter has moved. `target_fps` 0 follows the display. A lower cap waits N ticks (60 on a 120 Hz panel is every second tick). The graph asks for 60.
 - Input is polled after the wait, not right after the swap, so a frame draws input that is ~1 ms old instead of a frame old. On macOS `end_draw` swaps with `SwapScreenBuffer` instead of `EndDrawing`, which would poll a second time and eat raylib's key-press edges.
@@ -22,7 +22,7 @@ Raylib on its own misses fast trackpad clicks, blurs fullscreen on Retina, and d
 
 Glyphs are rasterized at `fontSize * dpi` and drawn with bilinear filtering and no mipmaps, snapped to the physical pixel grid. Trilinear filtering is what softens raylib text.
 
-Filled rectangles from `DrawRectangle` are quads, and this GL 4.1 context does not rasterize them. UI fills are triangles that sample a 1×1 white texture, which is also what makes `DrawRectangle` look empty if you call it yourself after the font atlas is bound. Circles and lines are unaffected.
+UI fills are rlgl triangles on a 1×1 white texture, which is also raylib's shapes texture, with rounded corners as triangle fans. Plain `DrawRectangle` and friends work too; rlgl turns quads into triangles on this GL 4.1 context.
 
 ## Layout
 

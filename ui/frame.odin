@@ -109,9 +109,8 @@ init :: proc(desc: Window_Desc) {
 	rl.SetConfigFlags(flags)
 	rl.InitWindow(desc.width, desc.height, desc.title)
 	rl.SetExitKey(rl.KeyboardKey.KEY_NULL)
-	// UI fills are triangles that sample this texel. DrawRectangle's quads do
-	// not rasterize on the macOS GL 4.1 context, and a triangle with no
-	// texcoord samples the font atlas and disappears.
+	// UI fills are triangles that sample this texel; raylib's own shape calls
+	// use it too.
 	white := rl.GenImageColor(1, 1, rl.WHITE)
 	shapes_tex = rl.LoadTextureFromImage(white)
 	rl.UnloadImage(white)
@@ -127,8 +126,6 @@ init :: proc(desc: Window_Desc) {
 	loaded_dpi = dpi_scale()
 
 	input = {}
-	input.keys_pressed = make(map[Key]bool)
-	input.keys_down = make(map[Key]bool)
 
 	clay_setup(desc)
 	reset_styles()
@@ -150,8 +147,6 @@ shutdown :: proc() {
 	custom_teardown()
 	delete(clay_memory)
 	clay_memory = nil
-	delete(input.keys_pressed)
-	delete(input.keys_down)
 	if shapes_tex.id != 0 {
 		rl.UnloadTexture(shapes_tex)
 	}
@@ -342,6 +337,20 @@ end_draw :: proc() {
 	busy_dt = f32(time.duration_seconds(busy + time.since(swap_start)))
 }
 
+// Write the back buffer to a PNG at framebuffer resolution. Call after
+// drawing, before end_draw. raylib's TakeScreenshot scales by the DPI a second
+// time on macOS: a 2x image with the frame in one corner.
+screenshot :: proc(path: cstring) -> bool {
+	rlgl.DrawRenderBatchActive()
+	w, h := framebuffer_size()
+	pixels := rlgl.ReadScreenPixels(w, h)
+	if pixels == nil {
+		return false
+	}
+	defer rl.MemFree(pixels)
+	return rl.ExportImage({data = pixels, width = w, height = h, mipmaps = 1, format = .UNCOMPRESSED_R8G8B8A8}, path)
+}
+
 element_box :: proc(id: string, index: u32 = 0) -> (clay.BoundingBox, bool) {
 	data := clay.GetElementData(clay.ID(id, index))
 	if !data.found {
@@ -460,12 +469,10 @@ measure_text :: proc "c" (
 
 @(private)
 poll_input :: proc() {
-	clear(&input.keys_pressed)
-	clear(&input.keys_down)
-
-	took_mouse := false
+	took_mouse, took_keys := false, false
 	when ODIN_OS == .Darwin {
 		took_mouse = darwin_take_mouse()
+		took_keys = darwin_take_keys()
 	}
 	if !took_mouse {
 		mp := rl.GetMousePosition()
@@ -490,7 +497,19 @@ poll_input :: proc() {
 		if rl.IsMouseButtonReleased(.RIGHT) do input.mouse_released |= 1 << u8(Mouse_Button.Right)
 		if rl.IsMouseButtonReleased(.MIDDLE) do input.mouse_released |= 1 << u8(Mouse_Button.Middle)
 	}
+	if took_keys {
+		return
+	}
 
+	// Raylib only compares key state between polls, so a tap that starts and
+	// ends inside one poll is lost here. macOS takes keys from the monitor.
+	input.keys_pressed = {}
+	input.keys_down = {}
+	input.mods = {}
+	if rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT) do input.mods += {.Shift}
+	if rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL) do input.mods += {.Ctrl}
+	if rl.IsKeyDown(.LEFT_ALT) || rl.IsKeyDown(.RIGHT_ALT) do input.mods += {.Alt}
+	if rl.IsKeyDown(.LEFT_SUPER) || rl.IsKeyDown(.RIGHT_SUPER) do input.mods += {.Super}
 	poll_key(.Escape, .ESCAPE)
 	poll_key(.Enter, .ENTER)
 	poll_key(.Space, .SPACE)
@@ -514,9 +533,9 @@ poll_input :: proc() {
 @(private)
 poll_key :: proc(k: Key, rk: rl.KeyboardKey) {
 	if rl.IsKeyPressed(rk) {
-		input.keys_pressed[k] = true
+		input.keys_pressed += {k}
 	}
 	if rl.IsKeyDown(rk) {
-		input.keys_down[k] = true
+		input.keys_down += {k}
 	}
 }
