@@ -247,11 +247,34 @@ key_from_code :: proc(code: u16) -> Key {
 	return .Unknown
 }
 
+// Top-left origin, in points of our window's content view. poll_input turns
+// points into layout units (zoom), so nothing here may use screen_w/screen_h,
+// which are already in layout units. The view does its own conversion, so the
+// title bar, fullscreen and any window size come out right. An event for no
+// window (or another one) reports screen or foreign-window coordinates, so it
+// goes through the screen into ours.
 @(private)
 mouse_pos_from_event :: proc(obj: ^Foundation.Object) {
+	win := cast(^Foundation.Object)rl.GetWindowHandle()
+	if win == nil {
+		return
+	}
+	view := intrinsics.objc_send(^Foundation.Object, win, "contentView")
+	if view == nil {
+		return
+	}
 	loc := intrinsics.objc_send(Foundation.Point, obj, "locationInWindow")
-	s_ev_x = f32(loc.x)
-	s_ev_y = screen_h - f32(loc.y)
+	ev_win := intrinsics.objc_send(^Foundation.Object, obj, "window")
+	if ev_win != win {
+		if ev_win != nil {
+			loc = intrinsics.objc_send(Foundation.Point, ev_win, "convertPointToScreen:", loc)
+		}
+		loc = intrinsics.objc_send(Foundation.Point, win, "convertPointFromScreen:", loc)
+	}
+	p := intrinsics.objc_send(Foundation.Point, view, "convertPoint:fromView:", loc, rawptr(nil))
+	bounds := intrinsics.objc_send(Foundation.Rect, view, "bounds")
+	s_ev_x = f32(p.x - bounds.origin.x)
+	s_ev_y = f32(bounds.size.height - (p.y - bounds.origin.y))
 }
 
 @(private)
