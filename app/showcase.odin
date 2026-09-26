@@ -168,7 +168,12 @@ build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 
 @(private = "file")
 theme_card :: proc(th: ^Theming) {
-	sub := "Follows `omarchy theme set` live, or pick a built-in palette." if th.omarchy else "Built-in palettes. On Omarchy, the active system theme shows up here too."
+	sub := "Built-in palettes. On Omarchy or macOS, the system theme shows up here too."
+	if th.omarchy {
+		sub = "Follows `omarchy theme set` live, or pick a built-in palette."
+	} else if th.system {
+		sub = "Follows the macOS appearance and accent color live, or pick a built-in palette."
+	}
 	if !ui.card_begin("sc_theme", "Theme", sub) {
 		return
 	}
@@ -177,6 +182,10 @@ theme_card :: proc(th: ^Theming) {
 	if th.omarchy {
 		append(&labels, fmt.tprintf("Omarchy · %s", th.omarchy_name))
 		append(&sources, Theme_Source.Omarchy)
+	}
+	if th.system {
+		append(&labels, fmt.tprintf("System · %s", th.system_name))
+		append(&sources, Theme_Source.System)
 	}
 	append(&labels, "Dark", "Light")
 	append(&sources, Theme_Source.Dark, Theme_Source.Light)

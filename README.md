@@ -70,15 +70,20 @@ UI fills are rlgl triangles on a 1×1 white texture, which is also raylib's shap
 
 `ui.theme` is a `Palette` (colors) plus `Metrics` (sizes, fonts), and widgets read their colors through `styles`, derived from it. Change colors with `ui.set_palette(p, fade)`, which can cross-fade.
 
-A palette usually comes from a `Theme_Base`: mode, background, foreground, accent, and optionally surface, border and status colors. `ui.palette_from_base` mixes the rest from those, with contrast floors so low-contrast themes stay readable (dim text at least 3.5:1, text on the accent 4.5:1 where black or white can reach it). Built in: `PALETTE_DARK` (the default) and `BASE_LIGHT`.
+A palette usually comes from a `Theme_Base`: mode, background, foreground, accent, and optionally surface, border, text on the accent, and status colors. `ui.palette_from_base` mixes the rest from those, with contrast floors so low-contrast themes stay readable (dim text at least 3.5:1, text on the accent 4.5:1 where black or white can reach it, unless the base sets it). Built in: `PALETTE_DARK` and `BASE_LIGHT`.
 
-`ui/omarchy` follows the active [Omarchy](https://omarchy.org) theme. It reads `~/.local/state/omarchy/current/theme/colors.toml` and notices `omarchy theme set` by polling `theme.name` twice a second. It is a separate package: the lib core never imports it, and outside Linux it compiles to a no-op. The demo app follows Omarchy when it is installed; the Showcase's Theme card switches between it and the built-in palettes, and `--theme=omarchy|dark|light` picks one at startup. All of Omarchy's bundled themes map cleanly.
+`ui/omarchy` follows the active [Omarchy](https://omarchy.org) theme. It reads `~/.local/state/omarchy/current/theme/colors.toml` and notices `omarchy theme set` by polling `theme.name` twice a second. It is a separate package: the lib core never imports it, and outside Linux it compiles to a no-op. All of Omarchy's bundled themes map cleanly.
+
+`ui/appearance` is the macOS counterpart. It reads AppKit's system colors under the app's effective appearance: window background, label text, separator, the accent picked in System Settings, and AppKit's white for text on the accent (4.0:1 on the default blue, which the 4.5:1 floor would otherwise turn black). Light/Dark and accent changes are noticed by re-reading the colors every 250 ms, since nothing in the loop receives the notification. `appearance.match_window` pins the title bar to a built-in palette's mode, or back to the system's with nil. Outside macOS it compiles to a no-op.
+
+The demo app follows Omarchy when it is installed, the macOS appearance on a Mac, and `PALETTE_DARK` otherwise. The Showcase's Theme card switches between the system theme and the built-in palettes, and `--theme=omarchy|system|dark|light` picks one at startup.
 
 ## Layout
 
 ```
 ui/            Clay widgets, the frame loop, the raylib renderer, themes, macOS and Wayland hooks
 ui/omarchy/    optional: follow the active Omarchy theme (Linux)
+ui/appearance/ optional: follow the system appearance and accent (macOS)
 app/           the graph
 deps/clay/     Clay bindings + built static libs
 deps/raylib/   raylib bindings + the Linux and macOS static libs and their build scripts

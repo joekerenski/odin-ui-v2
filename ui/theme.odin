@@ -123,15 +123,16 @@ Theme_Mode :: enum u8 {
 
 // The few colors a theme source has to provide. Alpha 0 means "derive it".
 Theme_Base :: struct {
-	mode:       Theme_Mode,
-	background: Color,
-	foreground: Color,
-	accent:     Color,
-	surface:    Color, // controls; default: background mixed 14% toward foreground
-	border:     Color, // default: 16% toward foreground
-	warning:    Color,
-	danger:     Color,
-	success:    Color,
+	mode:           Theme_Mode,
+	background:     Color,
+	foreground:     Color,
+	accent:         Color,
+	surface:        Color, // controls; default: background mixed 14% toward foreground
+	border:         Color, // default: 16% toward foreground
+	text_on_accent: Color, // default: whichever reads best; macOS sets its white
+	warning:        Color,
+	danger:         Color,
+	success:        Color,
 }
 
 // Fill a whole palette from a base. Shades mix background toward foreground,
@@ -170,6 +171,9 @@ palette_from_base :: proc(b: Theme_Base) -> Palette {
 				p.text_on_accent = c
 			}
 		}
+	}
+	if b.text_on_accent.a > 0 {
+		p.text_on_accent = opaque(b.text_on_accent)
 	}
 	p.warning = b.warning if b.warning.a > 0 else PALETTE_DARK.warning
 	p.danger = b.danger if b.danger.a > 0 else PALETTE_DARK.danger

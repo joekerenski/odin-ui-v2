@@ -41,6 +41,8 @@ main :: proc() {
 			tab = .Showcase
 		case "--theme=omarchy":
 			start_theme = .Omarchy
+		case "--theme=system":
+			start_theme = .System
 		case "--theme=dark":
 			start_theme = .Dark
 		case "--theme=light":
