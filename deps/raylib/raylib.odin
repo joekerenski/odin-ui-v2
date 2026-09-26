@@ -100,8 +100,8 @@ MAX_MATERIAL_MAPS      :: #config(RAYLIB_MAX_MATERIAL_MAPS, 12)
 // Wayland backends, picked at runtime. Wayland libraries are dlopened, so only
 // X11 is linked. There is no fallback: ui/wayland_linux.odin needs GLFW's
 // Wayland symbols, which the compiler's X11-only lib lacks.
-// macOS links ours (build_macos.sh) once macos/libraylib.a exists, and the
-// compiler's until then. Windows links the compiler's.
+// macOS links ours (build_macos.sh), falling back to the compiler's if
+// macos/libraylib.a is missing. Windows links the compiler's.
 VENDOR_RAYLIB :: "vendor:raylib/"
 MACOS_LIB :: "macos/libraylib.a" when #exists("macos/libraylib.a") else VENDOR_RAYLIB + "macos/libraylib.a"
 

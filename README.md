@@ -12,7 +12,7 @@ The app has two tabs under a top bar. **Graph** is a force-directed graph: nodes
 
 The font, raylib and GLFW are built into the binary, so `./graph` runs from any directory. On Linux it links dynamically only against libc, `libX11` and `libwayland-client`, which any desktop has.
 
-Use Odin's [official release](https://github.com/odin-lang/Odin/releases) (built and tested with `dev-2026-09`). Arch's `odin` package ships `vendor/` libraries as Git LFS pointer files, and macOS and Windows link raylib from the compiler.
+Use Odin's [official release](https://github.com/odin-lang/Odin/releases) (built and tested with `dev-2026-09`). Arch's `odin` package ships `vendor/` libraries as Git LFS pointer files, and Windows links raylib from the compiler.
 
 On the Graph tab: drag a node. **Link** then click another node to tie it to the selection. **N** adds a node, **delete** removes the selection, **space** pauses, **F** is fullscreen, **esc** quits. **F3** hides the timing strip. **Ctrl +/−/0** zooms the UI from 50% to 200% (**Cmd** on macOS); zooming in stops before the layout gets smaller than the 720×480 minimum window.
 
@@ -81,7 +81,7 @@ ui/            Clay widgets, the frame loop, the raylib renderer, themes, macOS 
 ui/omarchy/    optional: follow the active Omarchy theme (Linux)
 app/           the graph
 deps/clay/     Clay bindings + built static libs
-deps/raylib/   raylib bindings + the Linux static lib and its build script
+deps/raylib/   raylib bindings + the Linux and macOS static libs and their build scripts
 tools/         vsync_probe
 fonts/
 ```
