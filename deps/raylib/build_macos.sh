@@ -1,8 +1,8 @@
 #!/bin/sh
 # Build macos/libraylib.a on a Mac: raylib 6.0, the version these bindings
-# match, universal (arm64 + x86_64), macOS 11+. The bindings link it once it
-# exists, and the compiler's vendor:raylib lib until then. Commit the result
-# and update README.md here.
+# match, universal (arm64 + x86_64), macOS 11+. The result is committed;
+# rerun this only to change the raylib version or build flags, then update
+# README.md here.
 #
 # Needs the Xcode command line tools (clang, make, lipo) and git.
 set -eu
