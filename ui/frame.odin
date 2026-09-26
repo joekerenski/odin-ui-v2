@@ -30,10 +30,11 @@ Region_Box :: clay.BoundingBox
 //   }
 //   ui.shutdown()
 //
-// `frame` polls input and, on macOS, waits until a display-link tick has
-// landed since the previous frame. Present stays unsynced (swap interval 0);
-// the link is the clock, so a fullscreen flush that already blocked a vblank
-// does not get a second wait.
+// On macOS `frame` waits for the frame's slot, then polls input, so what the
+// frame draws is as fresh as the wait allows. Present stays unsynced (swap
+// interval 0); the view's display link is the clock. Fullscreen on an
+// adaptive-refresh screen runs on a deadline grid instead, with a second wait
+// in `end_draw` that holds the swap for its slot. See macos_darwin.odin.
 
 Window_Desc :: struct {
 	title:      cstring,
@@ -101,7 +102,7 @@ init :: proc(desc: Window_Desc) {
 	if desc.high_dpi do flags += {.WINDOW_HIGHDPI}
 	if desc.msaa_4x do flags += {.MSAA_4X_HINT}
 	// macOS GL swap interval does not track ProMotion and falls apart when the
-	// window is occluded. The display link in darwin.odin is the clock there.
+	// window is occluded. The display link in macos_darwin.odin is the clock.
 	when ODIN_OS != .Darwin {
 		flags += {.VSYNC_HINT}
 	}
@@ -162,11 +163,14 @@ shutdown :: proc() {
 frame :: proc() -> bool {
 	when ODIN_OS == .Darwin {
 		darwin_pace()
+		frame_start = time.now()
+		rl.PollInputEvents()
 	} else {
 		frame_dt = rl.GetFrameTime()
 		if frame_dt <= 0 {
 			frame_dt = 1.0 / 60.0
 		}
+		frame_start = time.now()
 	}
 	if quit_requested || rl.WindowShouldClose() {
 		return false
@@ -193,7 +197,6 @@ frame :: proc() -> bool {
 		fps_frames = 0
 	}
 
-	frame_start = time.now()
 	return true
 }
 
@@ -323,8 +326,20 @@ begin_draw :: proc() {
 }
 
 end_draw :: proc() {
-	rl.EndDrawing()
-	busy_dt = f32(time.duration_seconds(time.since(frame_start)))
+	// Flush first so a present wait is followed by nothing but the swap.
+	rlgl.DrawRenderBatchActive()
+	busy := time.since(frame_start)
+	when ODIN_OS == .Darwin {
+		darwin_present_wait()
+		// Not EndDrawing: it polls input right after the swap, and a second
+		// poll in `frame` would eat raylib's key-press edges.
+		swap_start := time.now()
+		rl.SwapScreenBuffer()
+	} else {
+		swap_start := time.now()
+		rl.EndDrawing()
+	}
+	busy_dt = f32(time.duration_seconds(busy + time.since(swap_start)))
 }
 
 element_box :: proc(id: string, index: u32 = 0) -> (clay.BoundingBox, bool) {

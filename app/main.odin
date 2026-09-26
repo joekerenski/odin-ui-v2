@@ -37,7 +37,7 @@ main :: proc() {
 		resizable  = true,
 		high_dpi   = true,
 		msaa_4x    = true,
-		target_fps = 0,
+		target_fps = 60,
 	})
 	defer ui.shutdown()
 

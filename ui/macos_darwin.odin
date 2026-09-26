@@ -3,17 +3,27 @@ package ui
 // macOS extras on top of raylib/GLFW:
 //   - NSEvent monitor so a tap that lands inside one poll is still a click
 //   - Spaces fullscreen (toggleFullScreen:) so the Retina backing scale stays
-//   - CVDisplayLink as the frame clock, with swap interval left at 0
+//   - the view's display link as the frame clock, with swap interval left at 0
+//   - a fixed present deadline in fullscreen on adaptive-refresh screens
 //
-// The link callback only bumps a counter and stores the host time. The main
-// thread waits until the counter has moved since the previous frame. If
-// fullscreen present already blocked through a vblank, the counter has moved
-// and the wait returns immediately.
+// The link (NSView.displayLink, macOS 14+) runs on its own thread and run
+// loop. Its tick bumps a counter, stores the target time, and signals a
+// semaphore. The main thread waits on that until the counter has moved.
+//
+// Fullscreen on an adaptive screen (ProMotion, adaptive-sync externals) scans
+// out directly, and the panel refreshes when a frame lands. The link then
+// reports those refreshes back (ticks 2-11ms apart at a 60fps cadence), so
+// pacing on it follows its own echo. There the clock is a deadline grid
+// instead: the thread wakes just early enough for the frame's work, the batch
+// is flushed, the thread sleeps to the deadline, and the swap goes out on it.
+// The thread is time-constrained while that runs, or the wake lands ~1ms late
+// with jitter from timer coalescing. Without a view display link (before
+// macOS 14) the deadline grid is the clock everywhere.
 
 import "base:intrinsics"
 import "base:runtime"
 import "core:c"
-import "core:time"
+import "core:thread"
 import Foundation "core:sys/darwin/Foundation"
 import rl "vendor:raylib"
 
@@ -27,55 +37,40 @@ foreign import libsystem "system:System"
 foreign libsystem {
 	@(link_name = "mach_timebase_info")
 	mach_timebase_info :: proc(info: ^Mach_Timebase) -> i32 ---
+	mach_absolute_time :: proc() -> u64 ---
+	mach_wait_until :: proc(deadline: u64) -> i32 ---
+	pthread_self :: proc() -> rawptr ---
+	pthread_mach_thread_np :: proc(thread: rawptr) -> u32 ---
+	thread_policy_set :: proc(thread: u32, flavor: u32, policy: rawptr, count: u32) -> i32 ---
+	dispatch_semaphore_create :: proc(value: int) -> rawptr ---
+	dispatch_semaphore_wait :: proc(sema: rawptr, timeout: u64) -> int ---
+	dispatch_semaphore_signal :: proc(sema: rawptr) -> int ---
+	dispatch_time :: proc(base: u64, delta: i64) -> u64 ---
+	dispatch_release :: proc(object: rawptr) ---
+}
+
+DISPATCH_TIME_NOW :: 0
+
+foreign import CoreFoundation "system:CoreFoundation.framework"
+foreign CoreFoundation {
+	CFRunLoopGetCurrent :: proc() -> rawptr ---
+	CFRunLoopRun :: proc() ---
+	CFRunLoopStop :: proc(loop: rawptr) ---
+}
+
+THREAD_STANDARD_POLICY :: 1
+THREAD_TIME_CONSTRAINT_POLICY :: 2
+
+Thread_Time_Constraint :: struct {
+	period:      u32,
+	computation: u32,
+	constraint:  u32,
+	preemptible: u32,
 }
 
 Mach_Timebase :: struct {
 	numer: u32,
 	denom: u32,
-}
-
-CV_SMPTE_Time :: struct {
-	subframes:        i16,
-	subframeDivisor:  i16,
-	counter:          u32,
-	type:             u32,
-	flags:            u32,
-	hours:            i16,
-	minutes:          i16,
-	seconds:          i16,
-	frames:           i16,
-}
-
-CV_Time_Stamp :: struct {
-	version:            u32,
-	videoTimeScale:     i32,
-	videoTime:          i64,
-	hostTime:           u64,
-	rateScalar:         f64,
-	videoRefreshPeriod: i64,
-	smpteTime:          CV_SMPTE_Time,
-	flags:              u64,
-	reserved:           u64,
-}
-
-Link_Callback :: proc "c" (
-	link: rawptr,
-	now: rawptr,
-	out_time: ^CV_Time_Stamp,
-	flags_in: u64,
-	flags_out: ^u64,
-	user: rawptr,
-) -> i32
-
-foreign import CoreVideo "system:CoreVideo.framework"
-foreign CoreVideo {
-	CVDisplayLinkCreateWithActiveCGDisplays :: proc(out: ^rawptr) -> i32 ---
-	CVDisplayLinkSetOutputCallback :: proc(link: rawptr, cb: Link_Callback, user: rawptr) -> i32 ---
-	CVDisplayLinkSetCurrentCGDisplay :: proc(link: rawptr, display_id: u32) -> i32 ---
-	CVDisplayLinkStart :: proc(link: rawptr) -> i32 ---
-	CVDisplayLinkStop :: proc(link: rawptr) -> i32 ---
-	CVDisplayLinkRelease :: proc(link: rawptr) ---
-	CVDisplayLinkGetActualOutputVideoRefreshPeriod :: proc(link: rawptr) -> f64 ---
 }
 
 BLOCK_IS_GLOBAL :: 1 << 28
@@ -224,113 +219,159 @@ darwin_is_fullscreen :: proc() -> bool {
 // --- display link -----------------------------------------------------------
 
 @(private)
+link_obj: ^Foundation.Object
+@(private)
+link_thread: ^thread.Thread
+@(private)
+link_loop: rawptr
+@(private)
+link_ready: rawptr
+@(private)
+link_sem: rawptr
+@(private)
 link_gen: i64
 @(private)
-link_host: u64
+link_target: u64 // f64 bits: targetTimestamp of the latest tick, host seconds
 @(private)
-link_ref: rawptr
+link_period: u64 // f64 bits: targetTimestamp - timestamp
 @(private)
-link_display: u32
+link_screen: ^Foundation.Screen
 @(private)
 pace_mark: i64
 @(private)
 pace_started: bool
 @(private)
-last_host: u64
+last_target: f64
 @(private)
 timebase: Mach_Timebase
+@(private)
+screen_adaptive: bool
+@(private)
+screen_min_interval: f64
+@(private)
+deadline_mode: bool
+@(private)
+present_at: u64
+@(private)
+work_peak: f64
 
 @(private)
-link_callback :: proc "c" (
-	link: rawptr,
-	now: rawptr,
-	out_time: ^CV_Time_Stamp,
-	flags_in: u64,
-	flags_out: ^u64,
-	user: rawptr,
-) -> i32 {
-	if out_time != nil {
-		intrinsics.atomic_store(&link_host, out_time.hostTime)
-	}
+link_tick :: proc "c" (self: rawptr, cmd: rawptr, link: ^Foundation.Object) {
+	ts := intrinsics.objc_send(f64, link, "timestamp")
+	target := intrinsics.objc_send(f64, link, "targetTimestamp")
+	intrinsics.atomic_store(&link_target, transmute(u64)target)
+	intrinsics.atomic_store(&link_period, transmute(u64)(target - ts))
 	intrinsics.atomic_add(&link_gen, 1)
-	return 0
+	dispatch_semaphore_signal(link_sem)
+}
+
+// Adds the link to this thread's run loop and runs it until darwin_stop.
+@(private)
+link_thread_proc :: proc() {
+	Foundation.scoped_autoreleasepool()
+	cls := cast(^Foundation.Object)Foundation.objc_lookUpClass("NSRunLoop")
+	loop := intrinsics.objc_send(^Foundation.Object, cls, "currentRunLoop")
+	intrinsics.objc_send(nil, link_obj, "addToRunLoop:forMode:", loop, Foundation.RunLoopCommonModes)
+	link_loop = CFRunLoopGetCurrent()
+	dispatch_semaphore_signal(link_ready)
+	CFRunLoopRun()
+	intrinsics.objc_send(nil, link_obj, "invalidate")
 }
 
 @(private)
-window_display_id :: proc() -> u32 {
+link_target_class :: proc() -> Foundation.Class {
+	name :: "UIFrameLinkTarget"
+	if cls := Foundation.objc_lookUpClass(name); cls != nil {
+		return cls
+	}
+	cls := Foundation.objc_allocateClassPair(intrinsics.objc_find_class("NSObject"), name, 0)
+	if cls == nil {
+		return nil
+	}
+	Foundation.class_addMethod(cls, intrinsics.objc_find_selector("tick:"), auto_cast link_tick, "v@:@")
+	Foundation.objc_registerClassPair(cls)
+	return cls
+}
+
+// The view's link follows the window between screens on its own.
+@(private)
+start_link :: proc() {
 	win := cast(^Foundation.Window)rl.GetWindowHandle()
 	if win == nil {
-		return 0
+		return
 	}
-	screen := Foundation.Window_screen(win)
-	if screen == nil {
-		return 0
+	view := intrinsics.objc_send(^Foundation.Object, win, "contentView")
+	sel := intrinsics.objc_find_selector("displayLinkWithTarget:selector:")
+	if view == nil || !intrinsics.objc_send(bool, view, "respondsToSelector:", sel) {
+		return
 	}
-	desc := intrinsics.objc_send(^Foundation.Object, screen, "deviceDescription")
-	if desc == nil {
-		return 0
-	}
-	cls := cast(^Foundation.Object)Foundation.objc_lookUpClass("NSString")
+	cls := link_target_class()
 	if cls == nil {
-		return 0
+		return
 	}
-	key := intrinsics.objc_send(^Foundation.Object, cls, "stringWithUTF8String:", cstring("NSScreenNumber"))
-	if key == nil {
-		return 0
+	target := intrinsics.objc_send(^Foundation.Object, intrinsics.objc_send(^Foundation.Object, cast(^Foundation.Object)cls, "alloc"), "init")
+	link := intrinsics.objc_send(^Foundation.Object, view, "displayLinkWithTarget:selector:", target, intrinsics.objc_find_selector("tick:"))
+	intrinsics.objc_send(nil, target, "release") // the link holds it
+	if link == nil {
+		return
 	}
-	num := intrinsics.objc_send(^Foundation.Object, desc, "objectForKey:", key)
-	if num == nil {
-		return 0
-	}
-	return intrinsics.objc_send(u32, num, "unsignedIntValue")
+	link_obj = intrinsics.objc_send(^Foundation.Object, link, "retain")
+	link_sem = dispatch_semaphore_create(0)
+	link_ready = dispatch_semaphore_create(0)
+	link_thread = thread.create_and_start(link_thread_proc, name = "frame link")
+	dispatch_semaphore_wait(link_ready, ~u64(0))
 }
 
 @(private)
-rebind_link :: proc() {
-	if link_ref == nil {
+stop_link :: proc() {
+	if link_obj == nil {
 		return
 	}
-	id := window_display_id()
-	if id == 0 || id == link_display {
+	CFRunLoopStop(link_loop)
+	thread.join(link_thread)
+	thread.destroy(link_thread)
+	intrinsics.objc_send(nil, link_obj, "release")
+	dispatch_release(link_sem)
+	dispatch_release(link_ready)
+	link_obj, link_thread, link_loop, link_sem, link_ready = nil, nil, nil, nil, nil
+}
+
+// minimumRefreshInterval < maximumRefreshInterval means the panel can hold a
+// frame for longer than one refresh: ProMotion, or adaptive sync. macOS 12+.
+// Re-read whenever the window lands on another screen.
+@(private)
+read_screen_refresh :: proc() {
+	win := cast(^Foundation.Window)rl.GetWindowHandle()
+	if win == nil {
 		return
 	}
-	CVDisplayLinkStop(link_ref)
-	if CVDisplayLinkSetCurrentCGDisplay(link_ref, id) == 0 {
-		link_display = id
+	screen := Foundation.Window_screen(win)
+	if screen == link_screen {
+		return
 	}
-	CVDisplayLinkStart(link_ref)
+	link_screen = screen
+	screen_adaptive = false
+	screen_min_interval = 0
+	if screen == nil || !intrinsics.objc_send(bool, screen, "respondsToSelector:", intrinsics.objc_find_selector("maximumRefreshInterval")) {
+		return
+	}
+	lo := intrinsics.objc_send(f64, screen, "minimumRefreshInterval")
+	hi := intrinsics.objc_send(f64, screen, "maximumRefreshInterval")
+	screen_min_interval = lo
+	screen_adaptive = lo > 0 && hi > lo * 1.5
 }
 
 darwin_start :: proc() {
 	install_input_monitor()
 	mach_timebase_info(&timebase)
-	link: rawptr
-	if CVDisplayLinkCreateWithActiveCGDisplays(&link) != 0 || link == nil {
-		return
-	}
-	if CVDisplayLinkSetOutputCallback(link, link_callback, nil) != 0 {
-		CVDisplayLinkRelease(link)
-		return
-	}
-	id := window_display_id()
-	if id != 0 {
-		CVDisplayLinkSetCurrentCGDisplay(link, id)
-		link_display = id
-	}
-	if CVDisplayLinkStart(link) != 0 {
-		CVDisplayLinkRelease(link)
-		return
-	}
-	link_ref = link
+	read_screen_refresh()
+	start_link()
 }
 
 darwin_stop :: proc() {
 	shutdown_input_monitor()
-	if link_ref != nil {
-		CVDisplayLinkStop(link_ref)
-		CVDisplayLinkRelease(link_ref)
-		link_ref = nil
-	}
+	set_realtime(false)
+	stop_link()
 }
 
 @(private)
@@ -342,61 +383,129 @@ host_seconds :: proc(delta: u64) -> f64 {
 }
 
 @(private)
-vblank_step :: proc() -> i64 {
-	if link_ref == nil {
-		return 1
+seconds_to_host :: proc(s: f64) -> u64 {
+	if timebase.numer == 0 {
+		return 0
 	}
-	period := CVDisplayLinkGetActualOutputVideoRefreshPeriod(link_ref)
+	return u64(s * 1e9 * f64(timebase.denom) / f64(timebase.numer))
+}
+
+// Link ticks per frame: 1 when following the display, 2 for 60 on 120 Hz.
+@(private)
+vblank_step :: proc() -> i64 {
+	period := transmute(f64)intrinsics.atomic_load(&link_period)
 	if period <= 0 || target_fps <= 0 {
 		return 1
 	}
-	hz := 1.0 / period
-	step := i64(math_round(hz / f64(target_fps)))
-	if step < 1 {
-		return 1
-	}
-	return step
+	return max(i64(1.0 / period / f64(target_fps) + 0.5), 1)
 }
 
+// One frame on the deadline grid: the target rate, or the panel's fastest.
 @(private)
-math_round :: proc(v: f64) -> f64 {
-	if v >= 0 {
-		return f64(i64(v + 0.5))
+deadline_period :: proc() -> u64 {
+	s := screen_min_interval
+	if target_fps > 0 && 1.0 / f64(target_fps) > s {
+		s = 1.0 / f64(target_fps)
 	}
-	return f64(i64(v - 0.5))
+	if s <= 0 {
+		s = 1.0 / 60.0
+	}
+	return seconds_to_host(s)
 }
 
-// Block until `vblank_step` link ticks have happened since the last sample.
-// A 100ms cap keeps a dead link from freezing quit. After the wait the mark
-// jumps to the current counter, so a hitch does not replay stale ticks.
+// Time-constrained scheduling: wakes on the deadline instead of ~1ms after
+// it. The budget is half a period; a frame that runs longer gets demoted by
+// the kernel for a while, which only costs precision.
+@(private)
+set_realtime :: proc(on: bool) {
+	thread := pthread_mach_thread_np(pthread_self())
+	if on {
+		period := deadline_period()
+		policy := Thread_Time_Constraint{
+			period      = u32(period),
+			computation = u32(period / 2),
+			constraint  = u32(period),
+			preemptible = 1,
+		}
+		thread_policy_set(thread, THREAD_TIME_CONSTRAINT_POLICY, &policy, 4)
+	} else {
+		none: u32
+		thread_policy_set(thread, THREAD_STANDARD_POLICY, &none, 0)
+	}
+}
+
+// Wait for this frame's slot to open; the caller polls input right after.
+//
+// Link mode (windowed, or a fixed-rate screen): block until `vblank_step`
+// ticks have landed since the last frame. A 100ms cap keeps a dead link from
+// freezing quit. After the wait the mark jumps to the current counter, so a
+// hitch does not replay stale ticks.
+//
+// Deadline mode: pick the next slot and sleep until the frame's recent peak
+// work time before it. `darwin_present_wait` holds the swap for the slot.
 darwin_pace :: proc() {
-	rebind_link()
-	gen := intrinsics.atomic_load(&link_gen)
-	if !pace_started || link_ref == nil {
+	read_screen_refresh()
+	use_deadline := link_obj == nil || (screen_adaptive && darwin_is_fullscreen())
+	if use_deadline != deadline_mode {
+		deadline_mode = use_deadline
+		set_realtime(use_deadline)
+		present_at = 0
+		pace_started = false
+	}
+	work_peak = max(f64(busy_dt), work_peak * 0.99)
+
+	if deadline_mode {
+		period := deadline_period()
+		now := mach_absolute_time()
+		if present_at == 0 {
+			present_at = now
+		}
+		prev := present_at
+		present_at += period
+		lead := clamp(seconds_to_host(work_peak * 1.5 + 0.001), seconds_to_host(0.002), period * 3 / 4)
+		if present_at - lead > now {
+			mach_wait_until(present_at - lead)
+		}
+		frame_dt = f32(host_seconds(present_at - prev))
+		return
+	}
+
+	if !pace_started {
 		pace_started = true
-		pace_mark = gen
-		last_host = intrinsics.atomic_load(&link_host)
+		for dispatch_semaphore_wait(link_sem, DISPATCH_TIME_NOW) == 0 {} // drop ticks from deadline mode
+		pace_mark = intrinsics.atomic_load(&link_gen)
+		last_target = transmute(f64)intrinsics.atomic_load(&link_target)
 		frame_dt = 1.0 / 60.0
 		return
 	}
 
-	step := vblank_step()
-	target := pace_mark + step
-	deadline := time.time_add(time.now(), 100 * time.Millisecond)
-	for intrinsics.atomic_load(&link_gen) < target {
-		if quit_requested || time.since(deadline) >= 0 {
+	target := pace_mark + vblank_step()
+	limit := dispatch_time(DISPATCH_TIME_NOW, 100_000_000)
+	for intrinsics.atomic_load(&link_gen) < target && !quit_requested {
+		if dispatch_semaphore_wait(link_sem, limit) != 0 {
 			break
 		}
-		time.sleep(200 * time.Microsecond)
 	}
 	pace_mark = intrinsics.atomic_load(&link_gen)
 
-	host := intrinsics.atomic_load(&link_host)
-	if last_host != 0 && host > last_host {
-		dt := host_seconds(host - last_host)
-		if dt > 0 && dt < 0.5 {
-			frame_dt = f32(dt)
-		}
+	t := transmute(f64)intrinsics.atomic_load(&link_target)
+	if last_target > 0 && t > last_target && t - last_target < 0.5 {
+		frame_dt = f32(t - last_target)
 	}
-	last_host = host
+	last_target = t
+}
+
+// Deadline mode only: sleep until this frame's slot so the swap leaves on it.
+// Call after the batch is flushed. A frame that missed its slot presents now
+// and the grid restarts from there.
+darwin_present_wait :: proc() {
+	if !deadline_mode {
+		return
+	}
+	now := mach_absolute_time()
+	if now < present_at {
+		mach_wait_until(present_at)
+	} else {
+		present_at = now
+	}
 }
