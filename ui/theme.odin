@@ -1,15 +1,22 @@
 package ui
 
 import clay "../deps/clay"
+import "core:math"
 
-// Design tokens. Mutate `theme` (or swap the whole struct) before building a
-// frame to restyle every widget that reads tokens through helpers below.
+// Design tokens. `theme` is a Palette (colors) and Metrics (sizes, fonts).
+// Fields read through `using`, so `theme.bg` and `theme.pad_md` both work.
+// Widgets read `styles`, which reset_styles() derives from `theme`.
+//
+// Change colors with set_palette (optionally cross-faded), not by poking
+// fields, so `styles` follows. A palette usually comes from a Theme_Base, a
+// few colors any theme source can provide (a preset, Omarchy's colors.toml,
+// a system appearance), with the rest mixed from them by palette_from_base.
 
 Color :: clay.Color
 
-Theme :: struct {
+Palette :: struct {
 	bg:             Color,
-	panel:          Color,
+	panel:          Color, // side panel, top bar, cards
 	surface:        Color, // tracks, inactive buttons
 	surface_hot:    Color, // hover
 	border:         Color,
@@ -21,7 +28,11 @@ Theme :: struct {
 	warning:        Color,
 	danger:         Color,
 	success:        Color,
+	canvas:         Color, // host drawing areas (the graph)
+	scrim:          Color, // translucent floating chrome (the debug strip)
+}
 
+Metrics :: struct {
 	radius_sm: f32,
 	radius_md: f32,
 
@@ -42,8 +53,13 @@ Theme :: struct {
 	size_small: u16,
 }
 
-// Dark "lab console" defaults — same family as gravsim.
-theme := Theme {
+Theme :: struct {
+	using palette: Palette,
+	using metrics: Metrics,
+}
+
+// Dark "lab console" defaults, same family as gravsim.
+PALETTE_DARK :: Palette {
 	bg             = {10, 12, 20, 255},
 	panel          = {18, 22, 34, 255},
 	surface        = {38, 44, 62, 255},
@@ -57,7 +73,22 @@ theme := Theme {
 	warning        = {255, 190, 90, 255},
 	danger         = {255, 110, 110, 255},
 	success        = {110, 210, 150, 255},
+	canvas         = {8, 10, 16, 255},
+	scrim          = {12, 16, 28, 210},
+}
 
+// Light counterpart, derived: palette_from_base(BASE_LIGHT).
+BASE_LIGHT :: Theme_Base {
+	mode       = .Light,
+	background = {244, 245, 249, 255},
+	foreground = {28, 32, 46, 255},
+	accent     = {38, 104, 220, 255},
+	warning    = {196, 120, 20, 255},
+	danger     = {206, 60, 60, 255},
+	success    = {40, 150, 90, 255},
+}
+
+METRICS_DEFAULT :: Metrics {
 	radius_sm = 4,
 	radius_md = 6,
 
@@ -76,6 +107,156 @@ theme := Theme {
 	size_title = 28,
 	size_body  = 16,
 	size_small = 14,
+}
+
+theme := Theme {
+	palette = PALETTE_DARK,
+	metrics = METRICS_DEFAULT,
+}
+
+// --- theme bases ----------------------------------------------------------------
+
+Theme_Mode :: enum u8 {
+	Dark,
+	Light,
+}
+
+// The few colors a theme source has to provide. Alpha 0 means "derive it".
+Theme_Base :: struct {
+	mode:       Theme_Mode,
+	background: Color,
+	foreground: Color,
+	accent:     Color,
+	surface:    Color, // controls; default: background mixed 14% toward foreground
+	border:     Color, // default: 16% toward foreground
+	warning:    Color,
+	danger:     Color,
+	success:    Color,
+}
+
+// Fill a whole palette from a base. Shades mix background toward foreground,
+// so they work in either mode: in a dark theme they lighten, in a light one
+// they darken. A few floors keep low-contrast themes readable (checked
+// against all of Omarchy's themes): dim text stays at 3.5:1 or better, text
+// on the accent at 4.5:1 where black or white can reach it, and a given
+// surface is only used when it stands out from the background.
+palette_from_base :: proc(b: Theme_Base) -> Palette {
+	bg, fg := opaque(b.background), opaque(b.foreground)
+	dark := b.mode == .Dark
+	p: Palette
+	p.bg = bg
+	p.panel = mix(bg, fg, 0.05)
+	p.surface = mix(bg, fg, 0.14)
+	if b.surface.a > 0 && contrast(b.surface, bg) >= min(1.35, contrast(p.surface, bg)) {
+		p.surface = opaque(b.surface)
+	}
+	p.surface_hot = mix(p.panel, p.surface, 0.55)
+	p.border = opaque(b.border) if b.border.a > 0 else mix(bg, fg, 0.16)
+	p.text = fg
+	dim_t := f32(0.42)
+	for dim_t > 0.1 && contrast(mix(fg, bg, dim_t), bg) < 3.5 {
+		dim_t -= 0.04
+	}
+	p.text_dim = mix(fg, bg, dim_t)
+	p.accent = opaque(b.accent)
+	p.accent_hot = mix(p.accent, {255, 255, 255, 255}, 0.2) if dark else mix(p.accent, {0, 0, 0, 255}, 0.15)
+	// Whichever of background and foreground reads better on the accent;
+	// near-black or near-white when neither reaches 4.5:1 and one of them does
+	// better.
+	p.text_on_accent = bg if contrast(bg, p.accent) >= contrast(fg, p.accent) else fg
+	if contrast(p.text_on_accent, p.accent) < 4.5 {
+		for c in ([2]Color{{16, 16, 20, 255}, {250, 250, 250, 255}}) {
+			if contrast(c, p.accent) > contrast(p.text_on_accent, p.accent) {
+				p.text_on_accent = c
+			}
+		}
+	}
+	p.warning = b.warning if b.warning.a > 0 else PALETTE_DARK.warning
+	p.danger = b.danger if b.danger.a > 0 else PALETTE_DARK.danger
+	p.success = b.success if b.success.a > 0 else PALETTE_DARK.success
+	p.canvas = mix(bg, {0, 0, 0, 255}, 0.22) if dark else mix(bg, {255, 255, 255, 255}, 0.5)
+	p.scrim = p.panel
+	p.scrim.a = 215
+	return p
+}
+
+// Swap the palette; metrics stay. `fade` seconds cross-fades from the current
+// colors (0 = at once). `styles` follows every frame of the fade.
+set_palette :: proc(p: Palette, fade: f32 = 0) {
+	if fade <= 0 {
+		s_fade = {}
+		theme.palette = p
+		reset_styles()
+		return
+	}
+	s_fade = {from = theme.palette, to = p, t = 0, duration = fade, active = true}
+}
+
+// Swap palette and metrics at once, no fade.
+set_theme :: proc(t: Theme) {
+	s_fade = {}
+	theme = t
+	reset_styles()
+}
+
+@(private)
+s_fade: struct {
+	from, to: Palette,
+	t:        f32,
+	duration: f32,
+	active:   bool,
+}
+
+@(private)
+PALETTE_LEN :: size_of(Palette) / size_of(Color)
+#assert(size_of(Palette) % size_of(Color) == 0, "Palette must hold only Colors")
+
+// Advance a running palette fade. Called by `frame`.
+@(private)
+theme_tick :: proc(dt: f32) {
+	if !s_fade.active {
+		return
+	}
+	s_fade.t = min(s_fade.t + dt / s_fade.duration, 1)
+	k := ease_in_out_cubic(s_fade.t)
+	from := transmute([PALETTE_LEN]Color)s_fade.from
+	to := transmute([PALETTE_LEN]Color)s_fade.to
+	out: [PALETTE_LEN]Color
+	for i in 0 ..< PALETTE_LEN {
+		out[i] = from[i] + (to[i] - from[i]) * k
+	}
+	theme.palette = transmute(Palette)out
+	reset_styles()
+	if s_fade.t >= 1 {
+		s_fade.active = false
+	}
+}
+
+// --- color math -------------------------------------------------------------------
+
+// a + (b - a) * t per channel, alpha included.
+mix :: proc(a, b: Color, t: f32) -> Color {
+	return a + (b - a) * t
+}
+
+@(private)
+opaque :: proc(c: Color) -> Color {
+	return {c.r, c.g, c.b, 255}
+}
+
+// WCAG relative luminance, 0..1.
+luminance :: proc(c: Color) -> f32 {
+	lin :: proc(v: f32) -> f32 {
+		v := v / 255
+		return v / 12.92 if v <= 0.04045 else math.pow((v + 0.055) / 1.055, 2.4)
+	}
+	return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+}
+
+// WCAG contrast ratio, 1..21.
+contrast :: proc(a, b: Color) -> f32 {
+	la, lb := luminance(a), luminance(b)
+	return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 }
 
 // --- resolved per-widget styles ----------------------------------------------

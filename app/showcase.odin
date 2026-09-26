@@ -34,7 +34,7 @@ PAGES :: 12
 @(private = "file")
 LIST_ROWS :: 24
 
-build_showcase :: proc(sc: ^Showcase) {
+build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 	if !ui.scroll_begin("Showcase") {
 		return
 	}
@@ -43,6 +43,8 @@ build_showcase :: proc(sc: ^Showcase) {
 	if ui.card_begin("sc_intro", "UI showcase", "Every widget in one place. Scroll with the wheel or drag the thumb on the right.") {
 		ui.element_end()
 	}
+
+	theme_card(th)
 
 	if ui.card_begin("sc_buttons", "Buttons", "Default, accent, and disabled. Width is shared across the row.") {
 		if ui.row_begin("sc_buttons_row", {gap = ui.theme.gap_md}) {
@@ -162,4 +164,30 @@ build_showcase :: proc(sc: ^Showcase) {
 		}
 		ui.element_end()
 	}
+}
+
+@(private = "file")
+theme_card :: proc(th: ^Theming) {
+	sub := "Follows `omarchy theme set` live, or pick a built-in palette." if th.omarchy else "Built-in palettes. On Omarchy, the active system theme shows up here too."
+	if !ui.card_begin("sc_theme", "Theme", sub) {
+		return
+	}
+	labels := make([dynamic]string, context.temp_allocator)
+	sources := make([dynamic]Theme_Source, context.temp_allocator)
+	if th.omarchy {
+		append(&labels, fmt.tprintf("Omarchy · %s", th.omarchy_name))
+		append(&sources, Theme_Source.Omarchy)
+	}
+	append(&labels, "Dark", "Light")
+	append(&sources, Theme_Source.Dark, Theme_Source.Light)
+	selected := 0
+	for s, i in sources {
+		if s == th.source {
+			selected = i
+		}
+	}
+	if picked := ui.tabs("sc_theme_tabs", labels[:], selected); picked != selected {
+		theming_set(th, sources[picked])
+	}
+	ui.element_end()
 }

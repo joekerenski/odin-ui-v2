@@ -221,6 +221,7 @@ frame :: proc() -> bool {
 		return false
 	}
 
+	theme_tick(frame_dt)
 	zoom = fit_zoom(pending_zoom)
 	screen_w = f32(rl.GetScreenWidth()) / zoom
 	screen_h = f32(rl.GetScreenHeight()) / zoom

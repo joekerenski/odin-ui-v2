@@ -66,10 +66,19 @@ Glyphs are rasterized at `fontSize * dpi` and drawn with bilinear filtering and 
 
 UI fills are rlgl triangles on a 1×1 white texture, which is also raylib's shapes texture, with rounded corners as triangle fans. Plain `DrawRectangle` and friends work too; rlgl turns quads into triangles on this GL 4.1 context.
 
+## Themes
+
+`ui.theme` is a `Palette` (colors) plus `Metrics` (sizes, fonts), and widgets read their colors through `styles`, derived from it. Change colors with `ui.set_palette(p, fade)`, which can cross-fade.
+
+A palette usually comes from a `Theme_Base`: mode, background, foreground, accent, and optionally surface, border and status colors. `ui.palette_from_base` mixes the rest from those, with contrast floors so low-contrast themes stay readable (dim text at least 3.5:1, text on the accent 4.5:1 where black or white can reach it). Built in: `PALETTE_DARK` (the default) and `BASE_LIGHT`.
+
+`ui/omarchy` follows the active [Omarchy](https://omarchy.org) theme. It reads `~/.local/state/omarchy/current/theme/colors.toml` and notices `omarchy theme set` by polling `theme.name` twice a second. It is a separate package: the lib core never imports it, and outside Linux it compiles to a no-op. The demo app follows Omarchy when it is installed; the Showcase's Theme card switches between it and the built-in palettes, and `--theme=omarchy|dark|light` picks one at startup. All of Omarchy's bundled themes map cleanly.
+
 ## Layout
 
 ```
-ui/            Clay widgets, the frame loop, the raylib renderer, macOS and Wayland hooks
+ui/            Clay widgets, the frame loop, the raylib renderer, themes, macOS and Wayland hooks
+ui/omarchy/    optional: follow the active Omarchy theme (Linux)
 app/           the graph
 deps/clay/     Clay bindings + built static libs
 deps/raylib/   raylib bindings + the Linux static lib and its build script

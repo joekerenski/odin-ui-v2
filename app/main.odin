@@ -6,6 +6,7 @@ package main
 //   ./run.sh
 //   ./run.sh --shot         write graph-shot.png after a short run and quit
 //   ./run.sh --showcase     start on the Showcase tab
+//   ./run.sh --theme=light  start with a palette: omarchy, dark, or light
 //
 // Drag a node to pin it under the cursor. Link is a mode: the next node you
 // click is tied to the selection. Esc quits, F toggles fullscreen, space pauses,
@@ -31,12 +32,19 @@ TAB_LABELS := []string{"Graph", "Showcase"}
 main :: proc() {
 	shot := false
 	tab := Tab.Graph
+	start_theme: Maybe(Theme_Source)
 	for a in os.args[1:] {
 		switch a {
 		case "--shot":
 			shot = true
 		case "--showcase":
 			tab = .Showcase
+		case "--theme=omarchy":
+			start_theme = .Omarchy
+		case "--theme=dark":
+			start_theme = .Dark
+		case "--theme=light":
+			start_theme = .Light
 		}
 	}
 
@@ -66,6 +74,13 @@ main :: proc() {
 	ui.load_font_data(ui.theme.font_body, ui.theme.size_body, FONT)
 	ui.load_font_data(ui.theme.font_small, ui.theme.size_small, FONT)
 
+	th: Theming
+	theming_init(&th)
+	defer theming_destroy(&th)
+	if s, ok := start_theme.?; ok {
+		theming_set(&th, s, fade = 0)
+	}
+
 	drag_id := -1
 	frame_n := 0
 
@@ -82,6 +97,7 @@ main :: proc() {
 			ui.toggle_fullscreen()
 		}
 		ui.zoom_shortcuts()
+		theming_update(&th)
 		if tab == .Graph {
 			graph_input(&g, &drag_id)
 		} else {
@@ -105,7 +121,7 @@ main :: proc() {
 				case .Graph:
 					build_panel(&g)
 				case .Showcase:
-					build_showcase(&sc)
+					build_showcase(&sc, &th)
 				}
 				ui.element_end()
 			}
@@ -225,7 +241,7 @@ build_panel :: proc(g: ^Graph) {
 		ui.dim("N add   bksp delete   space pause   F fullscreen")
 		ui.panel_end("Panel")
 	}
-	ui.canvas_begin("Canvas", {0, 0, 0, 0})
+	ui.canvas_begin("Canvas", ui.Color{}) // transparent: the graph is drawn under the UI
 	ui.element_end()
 }
 

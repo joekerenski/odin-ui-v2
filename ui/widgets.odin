@@ -73,11 +73,12 @@ panel_end :: proc(id: string = "Panel") {
 }
 
 // Growable content area (e.g. canvas). Host draws into this via region/clip.
-canvas_begin :: proc(id: string = "Canvas", bg: Color = {8, 10, 16, 255}) -> bool {
+// Fills with theme.canvas unless `bg` is given ({} for none).
+canvas_begin :: proc(id: string = "Canvas", bg: Maybe(Color) = nil) -> bool {
 	clay.OpenElementWithId(clay.ID(id))
 	return clay.ConfigureOpenElement(clay.ElementDeclaration{
 		layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})}},
-		backgroundColor = bg,
+		backgroundColor = bg.? or_else theme.canvas,
 	})
 }
 
@@ -573,7 +574,7 @@ debug_strip :: proc() {
 			padding         = clay.PaddingAll(8),
 			childGap        = 1,
 		},
-		backgroundColor = {12, 16, 28, 210},
+		backgroundColor = theme.scrim,
 		cornerRadius    = clay.CornerRadiusAll(theme.radius_sm),
 		floating = {
 			attachTo           = .Root,
