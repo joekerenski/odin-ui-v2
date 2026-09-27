@@ -1,9 +1,9 @@
 package main
 
 // Where the colors come from: the active Omarchy theme (Linux, when
-// Omarchy is installed), the macOS appearance, or one of the built-in
-// palettes. Following the platform's theme is the default when there is
-// one; the Showcase's Theme card switches.
+// Omarchy is installed), the macOS appearance, or the applied design's dark
+// or light colors. Following the platform's theme is the default when there
+// is one; the Showcase's Theme card and the Design tab switch.
 
 import ui "../ui"
 import "../ui/appearance"
@@ -12,8 +12,8 @@ import "../ui/omarchy"
 Theme_Source :: enum {
 	Omarchy,
 	System, // macOS appearance and accent
-	Dark,
-	Light,
+	Dark,  // the design's
+	Light, // the design's
 }
 
 Theming :: struct {
@@ -24,15 +24,15 @@ Theming :: struct {
 	system_name:  string, // "Dark" or "Light", static
 }
 
-// Seconds for a palette cross-fade.
-THEME_FADE :: 0.25
-
+// Call after the design is applied.
 theming_init :: proc(th: ^Theming) {
 	th.source = .Dark
 	if theming_load_omarchy(th, 0) {
 		th.source = .Omarchy
 	} else if theming_load_system(th, 0) {
 		th.source = .System
+	} else {
+		ui.set_palette(ui.design_palette(.Dark))
 	}
 }
 
@@ -46,17 +46,19 @@ theming_update :: proc(th: ^Theming) {
 	switch th.source {
 	case .Omarchy:
 		if omarchy.changed() {
-			theming_load_omarchy(th, THEME_FADE)
+			theming_load_omarchy(th, ui.theme.motion.enter)
 		}
 	case .System:
 		if appearance.changed() {
-			theming_load_system(th, THEME_FADE)
+			theming_load_system(th, ui.theme.motion.enter)
 		}
 	case .Dark, .Light:
 	}
 }
 
-theming_set :: proc(th: ^Theming, source: Theme_Source, fade: f32 = THEME_FADE) {
+// `fade` < 0 is the design's enter duration.
+theming_set :: proc(th: ^Theming, source: Theme_Source, fade: f32 = -1) {
+	fade := fade if fade >= 0 else ui.theme.motion.enter
 	if source == th.source {
 		return
 	}
@@ -70,10 +72,10 @@ theming_set :: proc(th: ^Theming, source: Theme_Source, fade: f32 = THEME_FADE) 
 			return
 		}
 	case .Dark:
-		ui.set_palette(ui.PALETTE_DARK, fade)
+		ui.set_palette(ui.design_palette(.Dark), fade)
 		appearance.match_window(ui.Theme_Mode.Dark)
 	case .Light:
-		ui.set_palette(ui.palette_from_base(ui.BASE_LIGHT), fade)
+		ui.set_palette(ui.design_palette(.Light), fade)
 		appearance.match_window(ui.Theme_Mode.Light)
 	}
 	th.source = source

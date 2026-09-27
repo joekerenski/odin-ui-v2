@@ -1,0 +1,48 @@
+# odin-ui design: load with ui.load_design, see ui/design.odin.
+
+name = "soft"
+
+[type]
+font_title = "Inter-Medium"
+font_heading = "Inter-Medium"
+font_body = "Inter-Medium"
+font_small = "Inter-Medium"
+size_title = 30
+size_heading = 18
+size_body = 16
+size_small = 14
+
+[shape]
+radius_sm = 10
+radius_md = 16
+pad_md = 14
+gap_md = 10
+row_h = 36
+slider_h = 8
+panel_w = 300
+bar_h = 52
+content_w = 720
+
+[motion]
+hover = 0.16
+change = 0.34
+enter = 0.32
+scroll = 0.2
+bounce = 0.35
+press = 0.18
+
+[dark]
+background = "#16141a"
+foreground = "#ece6f0"
+accent = "#c49bff"
+warning = "#ffc27a"
+danger = "#ff8a8a"
+success = "#8ad8a8"
+
+[light]
+background = "#faf7f5"
+foreground = "#2a2530"
+accent = "#7c4dea"
+warning = "#b86e10"
+danger = "#c83c48"
+success = "#258a55"

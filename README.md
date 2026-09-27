@@ -2,7 +2,7 @@
 
 Clay layout, raylib drawing, one window loop. Raylib is 6.0: the Odin compiler's bindings, vendored in `deps/raylib` with a Linux build that runs natively on Wayland (see [deps/raylib/README.md](deps/raylib/README.md)). Clay is the bindings and static lib from [nicbarker/clay](https://github.com/nicbarker/clay) `e6cc369`.
 
-The app has two tabs under a top bar. **Graph** is a force-directed graph: nodes repel, edges are springs, a weak pull keeps the cloud on the canvas, and the side panel drives the model. **Showcase** is a scrollable column of cards with every widget, a place to try things out ([app/showcase.odin](app/showcase.odin)); `./run.sh --showcase` starts there.
+The app has three tabs under a top bar. **Graph** is a force-directed graph: nodes repel, edges are springs, a weak pull keeps the cloud on the canvas, and the side panel drives the model. **Showcase** is a scrollable column of cards with every widget, a place to try things out ([app/showcase.odin](app/showcase.odin)); `./run.sh --showcase` starts there. **Design** edits the look and feel live and saves it as a design file (see [Designs](#designs)); `./run.sh --lab` starts there.
 
 ```bash
 ./run.sh              # build and run (Odin deletes the binary afterwards)
@@ -66,25 +66,68 @@ Glyphs are rasterized at `fontSize * dpi` and drawn with bilinear filtering and 
 
 UI fills are rlgl triangles on a 1×1 white texture, which is also raylib's shapes texture, with rounded corners as triangle fans. Plain `DrawRectangle` and friends work too; rlgl turns quads into triangles on this GL 4.1 context.
 
+The renderer sets the scissor only when something draws, and only when the box differs from the one in effect. A scissor change flushes raylib's batch, and every clipped floating element (a slider knob, a segment label) arrives as its own Clay root with its own scissor start and end. Setting them eagerly cost 4 ms a frame on the Design tab.
+
 ## Themes
 
-`ui.theme` is a `Palette` (colors) plus `Metrics` (sizes, fonts), and widgets read their colors through `styles`, derived from it. Change colors with `ui.set_palette(p, fade)`, which can cross-fade.
+`ui.theme` is a `Palette` (colors), `Metrics` (shape and spacing), `Typography` (text sizes per role) and `Motion`. Widgets read their colors through `styles`, derived from it. Change colors with `ui.set_palette(p, fade)`, which can cross-fade.
 
-A palette usually comes from a `Theme_Base`: mode, background, foreground, accent, and optionally surface, border, text on the accent, and status colors. `ui.palette_from_base` mixes the rest from those, with contrast floors so low-contrast themes stay readable (dim text at least 3.5:1, text on the accent 4.5:1 where black or white can reach it, unless the base sets it). Built in: `PALETTE_DARK` and `BASE_LIGHT`.
+A palette usually comes from a `Theme_Base`: mode, background, foreground, accent, and optionally surface, border, text on the accent, and status colors. `ui.palette_from_base` mixes the rest from those, with contrast floors so low-contrast themes stay readable (dim text at least 3.5:1, text on the accent 4.5:1 where black or white can reach it, unless the base sets it). Hover lifts a control toward the text color. Built in: `BASE_DARK` and `BASE_LIGHT`.
 
 `ui/omarchy` follows the active [Omarchy](https://omarchy.org) theme. It reads `~/.local/state/omarchy/current/theme/colors.toml` and notices `omarchy theme set` by polling `theme.name` twice a second. It is a separate package: the lib core never imports it, and outside Linux it compiles to a no-op. All of Omarchy's bundled themes map cleanly.
 
 `ui/appearance` is the macOS counterpart. It reads AppKit's system colors under the app's effective appearance: window background, label text, separator, the accent picked in System Settings, and AppKit's white for text on the accent (4.0:1 on the default blue, which the 4.5:1 floor would otherwise turn black). Light/Dark and accent changes are noticed by re-reading the colors every 250 ms, since nothing in the loop receives the notification. `appearance.match_window` pins the title bar to a built-in palette's mode, or back to the system's with nil. Outside macOS it compiles to a no-op.
 
-The demo app follows Omarchy when it is installed, the macOS appearance on a Mac, and `PALETTE_DARK` otherwise. The Showcase's Theme card switches between the system theme and the built-in palettes, and `--theme=omarchy|system|dark|light` picks one at startup.
+The demo app follows Omarchy when it is installed, the macOS appearance on a Mac, and the design's dark colors otherwise. The Showcase's Theme card switches between the system theme and the design's dark and light colors, and `--theme=omarchy|system|dark|light` picks one at startup.
+
+## Designs
+
+A design is the whole look and feel in one file: a font and size for each text role (title, heading, body, small), corner radii, padding, gaps and control sizes, motion, and colors for dark and light. Another project loads it:
+
+```odin
+ui.register_font("Inter-Medium", #load("fonts/Inter-Medium.ttf"))
+d, ok := ui.load_design("look.toml")      // or ui.parse_design(string(#load("look.toml")))
+defer ui.design_destroy(&d)
+ui.apply_design(d, .Dark)                 // nil keeps the current colors (system themes)
+```
+
+The file is a small TOML subset ([designs/console.toml](designs/console.toml)):
+
+- `[type]`: `font_<role>` is a name given to `ui.register_font`, or a path to a .ttf/.otf relative to the design file. An empty or unknown font falls back to the first one registered. `size_<role>` is in points.
+- `[shape]`: `Metrics`.
+- `[motion]`: durations in seconds, bounce, and press depth.
+- `[dark]` and `[light]`: a `Theme_Base`. Background, foreground and accent are required; the rest is derived unless given.
+- `[dark.palette]` and `[light.palette]`: optional palette fields set by hand, applied after the derivation.
+
+Keys a file leaves out keep the built-in value, and unknown keys are reported and skipped. Struct tags on the token fields (`range`, `label`, `unit`) drive both the file format and the editor, so a token added to `Metrics`, `Typography` or `Motion` shows up in both without further code.
+
+The **Design** tab edits a design live next to the showcase. It covers:
+
+- colors, as base or single palette fields, with an HSB picker
+- a font and a size for each role
+- every shape and motion token
+
+It saves to `designs/` next to the binary, and reloads the file when it changes on disk, so a text editor works too. Three designs are included: `console` (the default), `soft` and `compact`. `--design=NAME` starts with one. Fonts in `fonts/` show up in the font menus. A design that uses one refers to it by path, so ship the font with the design.
+
+### Motion
+
+Widgets animate through `ui.anim(id, target, duration, bounce)`, a spring per widget id and channel, kept in a table because immediate-mode widgets have nowhere else to keep state. A spring retargeted mid-flight turns around from where it is, instead of restarting like a timed tween, so sweeping the pointer over a row of buttons stays smooth. Values nobody asks for during a frame are dropped.
+
+- **Hover** eases each control toward its hover color. **Press** darkens it by the press depth. `ui.feedback` does both, for your own components too.
+- **Change** slides the segmented control's pill, the tab bar's underline, the switch's knob and the slider's knob, with the design's bounce on things that move. The dropdown's chevron turns over too.
+- **Enter** fades and drops menus in, and cross-fades palettes.
+- **Scroll** smooths the wheel. Clay's scroll position becomes the target, and the container eases toward it.
+
+`Button_Opts.force` shows a hover or press state without the pointer, for specimens like the Showcase's buttons card.
 
 ## Layout
 
 ```
-ui/            Clay widgets, the frame loop, the raylib renderer, themes, macOS and Wayland hooks
+ui/            Clay widgets, the frame loop, the raylib renderer, themes, designs, animation, macOS and Wayland hooks
 ui/omarchy/    optional: follow the active Omarchy theme (Linux)
 ui/appearance/ optional: follow the system appearance and accent (macOS)
-app/           the graph
+app/           the demo: graph, showcase, design editor
+designs/       design files: console (default), soft, compact
 deps/clay/     Clay bindings + built static libs
 deps/raylib/   raylib bindings + the Linux and macOS static libs and their build scripts
 tools/         vsync_probe

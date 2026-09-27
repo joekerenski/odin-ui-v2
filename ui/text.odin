@@ -14,6 +14,10 @@ title :: proc(s: string, color: Color = theme.text) {
 	text(s, theme.font_title, theme.size_title, color)
 }
 
+heading :: proc(s: string, color: Color = theme.text) {
+	text(s, theme.font_heading, theme.size_heading, color)
+}
+
 body :: proc(s: string, color: Color = theme.text) {
 	text(s, theme.font_body, theme.size_body, color)
 }

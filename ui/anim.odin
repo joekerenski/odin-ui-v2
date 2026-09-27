@@ -1,0 +1,194 @@
+package ui
+
+import clay "../deps/clay"
+import "core:math"
+
+// Animated values for immediate-mode widgets. A widget has no object to keep
+// state in, so each value lives in a table keyed by the widget's id and a
+// channel, and eases toward whatever target the widget asks for this frame:
+//
+//   k := ui.anim(id, 1 if hot else 0, ui.theme.motion.hover)
+//   bg := ui.mix(rest, hover, k)
+//
+// A value is a spring, not a timed tween. Retargeted mid-flight (the pointer
+// sweeping across a row of buttons) it turns around from where it is, with
+// its speed, instead of restarting or jumping. `duration` is about how long
+// it takes to settle; `bounce` above 0 overshoots, for things that move (not
+// colors, which would overshoot past their target). A value no widget asks
+// for during a frame is dropped, so a widget that comes back starts at rest
+// on its target, or at `from`.
+
+@(private)
+Anim :: struct {
+	value:    f32,
+	velocity: f32,
+	seen:     u64,
+}
+
+@(private)
+s_anims: map[u64]Anim
+
+// Frames since init; stamps what was asked for when.
+@(private)
+s_frame: u64
+
+anim :: proc(id: string, target: f32, duration: f32, bounce: f32 = 0, channel: u32 = 0, from: Maybe(f32) = nil) -> f32 {
+	key := u64(clay.ID(id).id) << 32 | u64(channel)
+	a, found := s_anims[key]
+	if !found {
+		a.value = from.? or_else target
+	}
+	// Asked twice in one frame: step once.
+	if a.seen != s_frame {
+		a.seen = s_frame
+		spring_step(&a.value, &a.velocity, target, duration, bounce, frame_dt)
+	}
+	s_anims[key] = a
+	return a.value
+}
+
+// One frame of a damped spring toward `target`. The natural frequency makes
+// a critically damped spring settle (to about 1%) in `duration`; `bounce`
+// lowers the damping. Integrated in small steps, so a long frame stays stable.
+spring_step :: proc(x, v: ^f32, target, duration, bounce, dt: f32) {
+	if duration <= 0.001 || dt <= 0 {
+		x^, v^ = target, 0
+		return
+	}
+	omega := 2 * math.PI / duration
+	zeta := 1 - math.clamp(bounce, 0, 0.95)
+	steps := max(1, int(math.ceil(dt * 240)))
+	h := dt / f32(steps)
+	for _ in 0 ..< steps {
+		acc := -omega * omega * (x^ - target) - 2 * zeta * omega * v^
+		v^ += acc * h
+		x^ += v^ * h
+	}
+	if math.abs(x^ - target) < 1e-4 && math.abs(v^) < 1e-3 {
+		x^, v^ = target, 0
+	}
+}
+
+// Called by `frame`: a new frame stamp, and values nobody asked for during
+// the last frame are dropped.
+@(private)
+anim_tick :: proc() {
+	s_frame += 1
+	stale := make([dynamic]u64, context.temp_allocator)
+	for key, a in s_anims {
+		if a.seen + 1 < s_frame {
+			append(&stale, key)
+		}
+	}
+	for key in stale {
+		delete_key(&s_anims, key)
+	}
+	scroll_tick()
+	picker_tick()
+}
+
+@(private)
+anim_teardown :: proc() {
+	delete(s_anims)
+	s_anims = nil
+	delete(s_scrolls)
+	s_scrolls = nil
+	delete(s_pickers)
+	s_pickers = nil
+}
+
+// --- smooth scrolling ------------------------------------------------------------
+//
+// Clay moves a scroll container by the whole wheel step at once. Here Clay's
+// result is the target, and the container eases toward it. Each frame the
+// container is put back on its target before Clay applies the wheel, so steps
+// add up from where the scroll is headed, not from where it happens to be.
+
+@(private)
+Scroll :: struct {
+	id:       clay.ElementId,
+	target:   f32,
+	velocity: f32,
+	seen:     u64,
+}
+
+@(private)
+s_scrolls: map[u32]Scroll
+
+// A scroll container that eases. scroll_begin and panel_begin call this.
+@(private)
+scroll_track :: proc(id: string) {
+	eid := clay.ID(id)
+	eid.stringId = {} // the string may live in the temp allocator
+	s, found := s_scrolls[eid.id]
+	if !found {
+		s.id = eid
+		data := clay.GetScrollContainerData(eid)
+		if data.found {
+			s.target = data.scrollPosition.y
+		}
+	}
+	s.seen = s_frame
+	s_scrolls[eid.id] = s
+}
+
+// Set a container's scroll at once, no easing (the scrollbar drag).
+@(private)
+scroll_jump :: proc(id: string, y: f32) {
+	eid := clay.ID(id)
+	data := clay.GetScrollContainerData(eid)
+	if !data.found {
+		return
+	}
+	data.scrollPosition.y = y
+	if s, ok := &s_scrolls[eid.id]; ok {
+		s.target = y
+		s.velocity = 0
+	}
+}
+
+@(private)
+scroll_tick :: proc() {
+	stale := make([dynamic]u32, context.temp_allocator)
+	for key, s in s_scrolls {
+		if s.seen + 1 < s_frame {
+			append(&stale, key)
+		}
+	}
+	for key in stale {
+		delete_key(&s_scrolls, key)
+	}
+}
+
+// begin_layout wraps Clay's wheel handling in these two.
+@(private)
+scroll_before_wheel :: proc() -> (restore: [dynamic]f32) {
+	restore = make([dynamic]f32, context.temp_allocator)
+	for _, s in s_scrolls {
+		data := clay.GetScrollContainerData(s.id)
+		if data.found {
+			append(&restore, data.scrollPosition.y)
+			data.scrollPosition.y = s.target
+		} else {
+			append(&restore, 0)
+		}
+	}
+	return
+}
+
+@(private)
+scroll_after_wheel :: proc(restore: [dynamic]f32) {
+	i := 0
+	for _, &s in s_scrolls {
+		defer i += 1
+		data := clay.GetScrollContainerData(s.id)
+		if !data.found || i >= len(restore) {
+			continue
+		}
+		max_scroll := max(0, data.contentDimensions.height - data.scrollContainerDimensions.height)
+		s.target = math.clamp(data.scrollPosition.y, -max_scroll, 0)
+		y := restore[i]
+		spring_step(&y, &s.velocity, s.target, theme.motion.scroll, 0, frame_dt)
+		data.scrollPosition.y = math.clamp(y, -max_scroll, 0)
+	}
+}

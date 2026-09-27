@@ -183,6 +183,8 @@ shutdown :: proc() {
 	delete(font_codepoints)
 	font_codepoints = nil
 	custom_teardown()
+	anim_teardown()
+	design_teardown()
 	delete(clay_memory)
 	clay_memory = nil
 	if shapes_tex.id != 0 {
@@ -222,6 +224,7 @@ frame :: proc() -> bool {
 	}
 
 	theme_tick(frame_dt)
+	anim_tick()
 	zoom = fit_zoom(pending_zoom)
 	screen_w = f32(rl.GetScreenWidth()) / zoom
 	screen_h = f32(rl.GetScreenHeight()) / zoom
@@ -342,6 +345,10 @@ zoom_shortcuts :: proc() {
 
 framebuffer_size :: proc() -> (i32, i32) {
 	return rl.GetRenderWidth(), rl.GetRenderHeight()
+}
+
+set_clipboard :: proc(text: string) {
+	rl.SetClipboardText(strings.clone_to_cstring(text, context.temp_allocator))
 }
 
 toggle_fullscreen :: proc() {
@@ -506,7 +513,9 @@ begin_layout :: proc() {
 	custom_begin_frame()
 	clay.SetLayoutDimensions({screen_w, screen_h})
 	clay.SetPointerState({input.mouse_x, input.mouse_y}, mouse_down(.Left))
+	restore := scroll_before_wheel()
 	clay.UpdateScrollContainers(false, {input.wheel_x, input.wheel_y}, frame_dt)
+	scroll_after_wheel(restore)
 	clay.BeginLayout()
 }
 

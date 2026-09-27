@@ -85,13 +85,21 @@ Custom_Kind :: enum u8 {
 	Circle,
 	// Triangle; a/b/c are offsets from the box's top-left.
 	Triangle,
+	// Horizontal gradient through `stops`, as a pill (ends rounded to half
+	// the height).
+	Gradient,
 }
+
+GRADIENT_STOPS :: 7
 
 Custom_Data :: struct {
 	kind:    Custom_Kind,
 	color:   Color,
 	// Triangle only — offsets from bounding-box origin.
 	a, b, c: [2]f32,
+	// Gradient only.
+	stops:   [GRADIENT_STOPS]Color,
+	count:   u8,
 }
 
 // Backing store for Custom payloads. Capacity is reserved up front and only
@@ -160,6 +168,8 @@ custom_circle_at :: proc(id, parent_id: string, cx, cy, r: f32, color: Color, in
 			zIndex     = 10,
 			attachment = {element = .LeftTop, parent = .LeftTop},
 			clipTo     = .AttachedParent,
+			// Decoration: hovering it still hovers the control under it.
+			pointerCaptureMode = .Passthrough,
 		},
 		custom = {customData = ptr},
 	}) {}
@@ -203,6 +213,8 @@ custom_triangle_at :: proc(id, parent_id: string, a, b, c: [2]f32, color: Color,
 			zIndex     = 10,
 			attachment = {element = .LeftTop, parent = .LeftTop},
 			clipTo     = .AttachedParent,
+			// Decoration: hovering it still hovers the control under it.
+			pointerCaptureMode = .Passthrough,
 		},
 		custom = {customData = ptr},
 	}) {}
@@ -230,5 +242,7 @@ dispatch_custom :: proc(cmd: ^clay.RenderCommand) {
 			{box.x + data.c.x, box.y + data.c.y},
 			data.color,
 		)
+	case .Gradient:
+		draw_gradient_pill(box, data.stops[:data.count])
 	}
 }

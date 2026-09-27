@@ -66,15 +66,41 @@ set_scissor :: proc(b: clay.BoundingBox) {
 
 // Clip boxes nest: each is intersected with its parent, and closing one
 // restores the parent instead of turning clipping off.
+//
+// A scissor change flushes raylib's batch. Every clipped floating element
+// (each slider knob, each segment label) is its own Clay root, bracketed in
+// its own scissor start and end, mostly with the same box as the one before.
+// So the scissor is only set when something draws, and only when it differs
+// from the one in effect: 80 knobs cost no flushes instead of 160.
 render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := context.temp_allocator) {
 	overlay := make([dynamic]Color, allocator)
 	clips := make([dynamic]clay.BoundingBox, allocator)
+	active: Maybe(clay.BoundingBox)
+	sync :: proc(active: ^Maybe(clay.BoundingBox), clips: [dynamic]clay.BoundingBox) {
+		want: Maybe(clay.BoundingBox)
+		if len(clips) > 0 {
+			want = clips[len(clips) - 1]
+		}
+		if active^ == want {
+			return
+		}
+		active^ = want
+		if box, ok := want.?; ok {
+			set_scissor(box)
+		} else {
+			rl.EndScissorMode()
+		}
+	}
+	defer if active != nil {
+		rl.EndScissorMode()
+	}
 	for i in 0 ..< commands.length {
 		cmd := clay.RenderCommandArray_Get(commands, i32(i))
 		b := cmd.boundingBox
 		switch cmd.commandType {
 		case .None:
 		case .Text:
+			sync(&active, clips)
 			config := cmd.renderData.text
 			t := string(config.stringContents.chars[:config.stringContents.length])
 			if int(config.fontId) >= len(fonts) || fonts[config.fontId].font.glyphCount <= 0 {
@@ -90,6 +116,7 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 				to_rl_color(apply_overlay(config.textColor, overlay)),
 			)
 		case .Image:
+			sync(&active, clips)
 			tex := (^rl.Texture2D)(cmd.renderData.image.imageData)
 			if tex == nil || tex.width == 0 {
 				continue
@@ -108,20 +135,16 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 				r = {x0, y0, max(0, x1 - x0), max(0, y1 - y0)}
 			}
 			append(&clips, r)
-			set_scissor(r)
 		case .ScissorEnd:
 			if len(clips) > 0 {
 				pop(&clips)
 			}
-			if len(clips) > 0 {
-				set_scissor(clips[len(clips) - 1])
-			} else {
-				rl.EndScissorMode()
-			}
 		case .Rectangle:
+			sync(&active, clips)
 			config := cmd.renderData.rectangle
 			draw_round_rect(b, config.cornerRadius, apply_overlay(config.backgroundColor, overlay))
 		case .Border:
+			sync(&active, clips)
 			config := cmd.renderData.border
 			draw_border(b, config, apply_overlay(config.color, overlay))
 		case .OverlayColorStart:
@@ -136,6 +159,7 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 				pop(&overlay)
 			}
 		case .Custom:
+			sync(&active, clips)
 			dispatch_custom(cmd)
 		}
 	}
@@ -195,6 +219,44 @@ fill_corner :: proc(cx, cy, radius, a0, a1: f32, c: rl.Color) {
 	fill_end()
 }
 
+// A horizontal gradient through `stops` (evenly spaced), with round ends in
+// the first and last color. Vertex colors, so it is smooth at any width.
+@(private)
+draw_gradient_pill :: proc(b: clay.BoundingBox, stops: []Color) {
+	if len(stops) == 0 || b.width <= 0 || b.height <= 0 || shapes_tex.id == 0 {
+		return
+	}
+	r := min(b.height, b.width) * 0.5
+	x0, x1 := b.x + r, b.x + b.width - r
+	y0, y1 := b.y, b.y + b.height
+	fill_corner(x0, b.y + r, r, 90, 270, to_rl_color(stops[0]))
+	fill_corner(x1, b.y + r, r, 270, 450, to_rl_color(stops[len(stops) - 1]))
+	if len(stops) == 1 {
+		fill_rect(x0, y0, x1 - x0, y1 - y0, to_rl_color(stops[0]))
+		return
+	}
+	seg := (x1 - x0) / f32(len(stops) - 1)
+	rlgl.SetTexture(shapes_tex.id)
+	rlgl.Begin(rlgl.TRIANGLES)
+	for i in 0 ..< len(stops) - 1 {
+		a, c := to_rl_color(stops[i]), to_rl_color(stops[i + 1])
+		xa, xc := x0 + seg * f32(i), x0 + seg * f32(i + 1)
+		vert :: proc(x, y: f32, col: rl.Color) {
+			rlgl.Color4ub(col.r, col.g, col.b, col.a)
+			rlgl.TexCoord2f(0.5, 0.5)
+			rlgl.Vertex2f(x, y)
+		}
+		vert(xa, y0, a)
+		vert(xa, y1, a)
+		vert(xc, y0, c)
+		vert(xc, y0, c)
+		vert(xa, y1, a)
+		vert(xc, y1, c)
+	}
+	rlgl.End()
+	rlgl.SetTexture(0)
+}
+
 @(private)
 draw_round_rect :: proc(b: clay.BoundingBox, rad: clay.CornerRadius, col: Color) {
 	if b.width <= 0 || b.height <= 0 || col[3] <= 0 {
@@ -225,6 +287,10 @@ draw_border :: proc(b: clay.BoundingBox, config: clay.BorderRenderData, col: Col
 	}
 	rlc := to_rl_color(col)
 	w := config.width
+	// Like fills: no corner bigger than half the box, or the rings cross.
+	config := config
+	lim := min(b.width, b.height) * 0.5
+	config.cornerRadius = {min(config.cornerRadius.topLeft, lim), min(config.cornerRadius.topRight, lim), min(config.cornerRadius.bottomLeft, lim), min(config.cornerRadius.bottomRight, lim)}
 	if w.left > 0 {
 		fill_rect(b.x, b.y + config.cornerRadius.topLeft, f32(w.left), b.height - config.cornerRadius.topLeft - config.cornerRadius.bottomLeft, rlc)
 	}

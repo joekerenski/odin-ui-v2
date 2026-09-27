@@ -1,0 +1,50 @@
+# odin-ui design: load with ui.load_design, see ui/design.odin.
+
+name = "console"
+
+[type]
+font_title = "Inter-Medium"
+font_heading = "Inter-Medium"
+font_body = "Inter-Medium"
+font_small = "Inter-Medium"
+size_title = 28
+size_heading = 17
+size_body = 16
+size_small = 14
+
+[shape]
+radius_sm = 4
+radius_md = 6
+pad_md = 12
+gap_md = 8
+row_h = 30
+slider_h = 6
+panel_w = 280
+bar_h = 44
+content_w = 760
+
+[motion]
+hover = 0.12
+change = 0.22
+enter = 0.25
+scroll = 0.14
+bounce = 0.15
+press = 0.25
+
+[dark]
+background = "#0a0c14"
+foreground = "#dce2f0"
+accent = "#6eaaff"
+surface = "#262c3e"
+border = "#282e42"
+warning = "#ffbe5a"
+danger = "#ff6e6e"
+success = "#6ed296"
+
+[light]
+background = "#f4f5f9"
+foreground = "#1c202e"
+accent = "#2668dc"
+warning = "#c47814"
+danger = "#ce3c3c"
+success = "#28965a"

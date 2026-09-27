@@ -3,14 +3,21 @@ package ui
 import clay "../deps/clay"
 import "core:math"
 
-// Design tokens. `theme` is a Palette (colors) and Metrics (sizes, fonts).
-// Fields read through `using`, so `theme.bg` and `theme.pad_md` both work.
-// Widgets read `styles`, which reset_styles() derives from `theme`.
+// Design tokens. `theme` is a Palette (colors), Metrics (shape and spacing),
+// Typography (text sizes and the font slot of each role), and Motion. Fields
+// read through `using`, so `theme.bg`, `theme.pad_md` and `theme.size_body`
+// all work; motion is `theme.motion.hover`. Widgets read `styles`, which
+// reset_styles() derives from `theme`.
 //
 // Change colors with set_palette (optionally cross-faded), not by poking
 // fields, so `styles` follows. A palette usually comes from a Theme_Base, a
 // few colors any theme source can provide (a preset, Omarchy's colors.toml,
 // a system appearance), with the rest mixed from them by palette_from_base.
+// A whole look, colors for both modes included, is a Design (design.odin).
+//
+// Struct tags drive the design file and the Design tab's editor:
+// `range:"lo,hi"` bounds a token, `label` names it, `unit:"ms"` shows seconds
+// as milliseconds, and `design:"-"` keeps a field out of design files.
 
 Color :: clay.Color
 
@@ -33,37 +40,62 @@ Palette :: struct {
 }
 
 Metrics :: struct {
-	radius_sm: f32,
-	radius_md: f32,
+	radius_sm: f32 `range:"0,16" label:"Radius, controls"`,
+	radius_md: f32 `range:"0,24" label:"Radius, cards and menus"`,
+	pad_md:    u16 `range:"4,24" label:"Padding"`,
+	gap_md:    u16 `range:"2,20" label:"Gap"`,
+	row_h:     f32 `range:"22,48" label:"Control height"`, // default control height
+	slider_h:  f32 `range:"2,16" label:"Slider track"`,
+	panel_w:   f32 `range:"220,420" label:"Panel width"`,
+	bar_h:     f32 `range:"32,64" label:"Top bar height"`,
+	content_w: f32 `range:"520,1100" label:"Content width"`, // max width of centered content (cards)
+}
 
-	pad_md: u16,
-	gap_md: u16,
+// A font per role, and its size. The font ids are slots filled by
+// apply_design (or load_font), not design tokens.
+Type_Role :: enum u8 {
+	Title,
+	Heading,
+	Body,
+	Small,
+}
 
-	row_h:     f32, // default control height
-	slider_h:  f32,
-	panel_w:   f32,
-	bar_h:     f32, // top bar
-	content_w: f32, // max width of centered content (cards)
+Typography :: struct {
+	font_title:   u16 `design:"-"`,
+	font_heading: u16 `design:"-"`,
+	font_body:    u16 `design:"-"`,
+	font_small:   u16 `design:"-"`,
+	size_title:   u16 `range:"16,48" label:"Title"`,
+	size_heading: u16 `range:"12,28" label:"Heading"`,
+	size_body:    u16 `range:"11,22" label:"Body"`,
+	size_small:   u16 `range:"9,18" label:"Small"`,
+}
 
-	font_title: u16,
-	font_body:  u16,
-	font_small: u16,
-	size_title: u16,
-	size_body:  u16,
-	size_small: u16,
+// How the UI moves. Durations are seconds, about the time a change takes to
+// settle (see `anim`).
+Motion :: struct {
+	hover:  f32 `range:"0,0.4" unit:"ms" label:"Hover"`,          // hover and press
+	change: f32 `range:"0,0.6" unit:"ms" label:"Change"`,         // toggles, selection, sliding indicators
+	enter:  f32 `range:"0,0.6" unit:"ms" label:"Enter"`,          // menus appearing, theme cross-fades
+	scroll: f32 `range:"0,0.4" unit:"ms" label:"Scroll"`,         // wheel smoothing, 0 = off
+	bounce: f32 `range:"0,0.6" label:"Bounce"`,                   // overshoot on things that move
+	press:  f32 `range:"0,0.5" label:"Press depth"`,              // how far a held control darkens
 }
 
 Theme :: struct {
-	using palette: Palette,
-	using metrics: Metrics,
+	using palette:    Palette,
+	using metrics:    Metrics,
+	using typography: Typography,
+	motion:           Motion,
 }
 
-// Dark "lab console" defaults, same family as gravsim.
+// Dark "lab console" defaults, same family as gravsim. What `theme` holds
+// before a design is applied, and the fallback status colors.
 PALETTE_DARK :: Palette {
 	bg             = {10, 12, 20, 255},
 	panel          = {18, 22, 34, 255},
 	surface        = {38, 44, 62, 255},
-	surface_hot    = {30, 36, 52, 255},
+	surface_hot    = {52, 58, 76, 255},
 	border         = {40, 46, 66, 255},
 	text           = {220, 226, 240, 255},
 	text_dim       = {130, 140, 165, 255},
@@ -75,6 +107,19 @@ PALETTE_DARK :: Palette {
 	success        = {110, 210, 150, 255},
 	canvas         = {8, 10, 16, 255},
 	scrim          = {12, 16, 28, 210},
+}
+
+// The same look as a base, for designs: palette_from_base(BASE_DARK).
+BASE_DARK :: Theme_Base {
+	mode       = .Dark,
+	background = {10, 12, 20, 255},
+	foreground = {220, 226, 240, 255},
+	accent     = {110, 170, 255, 255},
+	surface    = {38, 44, 62, 255},
+	border     = {40, 46, 66, 255},
+	warning    = {255, 190, 90, 255},
+	danger     = {255, 110, 110, 255},
+	success    = {110, 210, 150, 255},
 }
 
 // Light counterpart, derived: palette_from_base(BASE_LIGHT).
@@ -93,25 +138,40 @@ METRICS_DEFAULT :: Metrics {
 	radius_md = 6,
 
 	pad_md = 12,
-	gap_md = 10,
+	gap_md = 8,
 
 	row_h     = 30,
-	slider_h  = 10,
-	panel_w   = 300,
+	slider_h  = 6,
+	panel_w   = 280,
 	bar_h     = 44,
 	content_w = 760,
+}
 
-	font_title = 0,
-	font_body  = 1,
-	font_small = 2,
-	size_title = 28,
-	size_body  = 16,
-	size_small = 14,
+TYPOGRAPHY_DEFAULT :: Typography {
+	font_title   = u16(Type_Role.Title),
+	font_heading = u16(Type_Role.Heading),
+	font_body    = u16(Type_Role.Body),
+	font_small   = u16(Type_Role.Small),
+	size_title   = 28,
+	size_heading = 17,
+	size_body    = 16,
+	size_small   = 14,
+}
+
+MOTION_DEFAULT :: Motion {
+	hover  = 0.12,
+	change = 0.22,
+	enter  = 0.25,
+	scroll = 0.14,
+	bounce = 0.15,
+	press  = 0.25,
 }
 
 theme := Theme {
-	palette = PALETTE_DARK,
-	metrics = METRICS_DEFAULT,
+	palette    = PALETTE_DARK,
+	metrics    = METRICS_DEFAULT,
+	typography = TYPOGRAPHY_DEFAULT,
+	motion     = MOTION_DEFAULT,
 }
 
 // --- theme bases ----------------------------------------------------------------
@@ -123,7 +183,7 @@ Theme_Mode :: enum u8 {
 
 // The few colors a theme source has to provide. Alpha 0 means "derive it".
 Theme_Base :: struct {
-	mode:           Theme_Mode,
+	mode:           Theme_Mode `design:"-"`,
 	background:     Color,
 	foreground:     Color,
 	accent:         Color,
@@ -151,7 +211,9 @@ palette_from_base :: proc(b: Theme_Base) -> Palette {
 	if b.surface.a > 0 && contrast(b.surface, bg) >= min(1.35, contrast(p.surface, bg)) {
 		p.surface = opaque(b.surface)
 	}
-	p.surface_hot = mix(p.panel, p.surface, 0.55)
+	// Hover lifts a control toward the text: lighter in a dark theme,
+	// darker in a light one.
+	p.surface_hot = mix(p.surface, fg, 0.08)
 	p.border = opaque(b.border) if b.border.a > 0 else mix(bg, fg, 0.16)
 	p.text = fg
 	dim_t := f32(0.42)
@@ -211,7 +273,7 @@ s_fade: struct {
 	active:   bool,
 }
 
-@(private)
+// Palette's field count: it holds only Colors, so it also casts to an array.
 PALETTE_LEN :: size_of(Palette) / size_of(Color)
 #assert(size_of(Palette) % size_of(Color) == 0, "Palette must hold only Colors")
 
@@ -263,6 +325,56 @@ contrast :: proc(a, b: Color) -> f32 {
 	return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
 }
 
+// Hue in degrees 0..360, saturation and value 0..1. Alpha is left out.
+rgb_to_hsv :: proc(c: Color) -> (h, s, v: f32) {
+	r, g, b := c.r / 255, c.g / 255, c.b / 255
+	hi := max(r, g, b)
+	lo := min(r, g, b)
+	d := hi - lo
+	v = hi
+	s = d / hi if hi > 0 else 0
+	if d <= 0 {
+		return
+	}
+	if hi == r {
+		h = 60 * math.mod((g - b) / d, 6)
+	} else if hi == g {
+		h = 60 * ((b - r) / d + 2)
+	} else {
+		h = 60 * ((r - g) / d + 4)
+	}
+	if h < 0 {
+		h += 360
+	}
+	return
+}
+
+hsv_to_rgb :: proc(h, s, v: f32, alpha: f32 = 255) -> Color {
+	h := math.mod(h, 360)
+	if h < 0 {
+		h += 360
+	}
+	c := v * s
+	x := c * (1 - math.abs(math.mod(h / 60, 2) - 1))
+	m := v - c
+	r, g, b: f32
+	switch {
+	case h < 60:
+		r, g, b = c, x, 0
+	case h < 120:
+		r, g, b = x, c, 0
+	case h < 180:
+		r, g, b = 0, c, x
+	case h < 240:
+		r, g, b = 0, x, c
+	case h < 300:
+		r, g, b = x, 0, c
+	case:
+		r, g, b = c, 0, x
+	}
+	return {(r + m) * 255, (g + m) * 255, (b + m) * 255, alpha}
+}
+
 // --- resolved per-widget styles ----------------------------------------------
 //
 // Widgets read `styles.<widget>.<field>` for chrome. `reset_styles()` re-derives
@@ -280,16 +392,20 @@ Button_Style :: struct {
 }
 
 Toggle_Style :: struct {
-	bg:      Color,
-	text:    Color,
-	on_bg:   Color,
-	on_text: Color,
-	radius:  f32,
-	height:  f32,
+	bg:       Color,
+	bg_hover: Color,
+	text:     Color,
+	on_bg:    Color,
+	on_hover: Color,
+	on_text:  Color,
+	knob:     Color, // the switch's knob
+	radius:   f32,
+	height:   f32,
 }
 
 Slider_Style :: struct {
 	track:      Color,
+	fill:       Color, // the track up to the knob
 	label:      Color,
 	value:      Color,
 	knob:       Color,
@@ -391,21 +507,25 @@ styles_from_theme :: proc(t: Theme) -> Widget_Styles {
 			height         = t.row_h,
 		},
 		toggle = {
-			bg      = t.surface,
-			text    = t.text,
-			on_bg   = t.accent,
-			on_text = t.text_on_accent,
-			radius  = t.radius_sm,
-			height  = t.row_h,
+			bg       = t.surface,
+			bg_hover = t.surface_hot,
+			text     = t.text,
+			on_bg    = t.accent,
+			on_hover = t.accent_hot,
+			on_text  = t.text_on_accent,
+			knob     = t.text,
+			radius   = t.radius_sm,
+			height   = t.row_h,
 		},
 		slider = {
 			track      = t.surface,
+			fill       = t.accent,
 			label      = t.text,
 			value      = t.accent,
 			knob       = t.accent,
 			knob_inner = t.bg,
 			height     = t.slider_h,
-			knob_r     = 6,
+			knob_r     = max(6, t.slider_h),
 		},
 		panel = {
 			bg      = t.panel,

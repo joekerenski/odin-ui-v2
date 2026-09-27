@@ -1,12 +1,16 @@
 package main
 
-// Two tabs under a top bar. Graph: nodes repel, edges pull, the panel edits
+// Three tabs under a top bar. Graph: nodes repel, edges pull, the panel edits
 // the model. Showcase: every widget in a scrollable column (showcase.odin).
+// Design: edit the look and feel and save it as a design file
+// (design_lab.odin).
 //
 //   ./run.sh
-//   ./run.sh --shot         write graph-shot.png after a short run and quit
-//   ./run.sh --showcase     start on the Showcase tab
-//   ./run.sh --theme=light  start with a palette: omarchy, dark, or light
+//   ./run.sh --shot           write graph-shot.png after a short run and quit
+//   ./run.sh --showcase       start on the Showcase tab
+//   ./run.sh --lab            start on the Design tab
+//   ./run.sh --design=soft    start with designs/soft.toml (default: console)
+//   ./run.sh --theme=light    start with colors: omarchy, system, dark, or light
 //
 // Drag a node to pin it under the cursor. Link is a mode: the next node you
 // click is tied to the selection. Esc quits, F toggles fullscreen, space pauses,
@@ -16,6 +20,7 @@ import ui "../ui"
 import "core:fmt"
 import "core:math"
 import "core:os"
+import "core:strings"
 import rl "../deps/raylib"
 
 // Embedded, so the binary runs from any directory.
@@ -24,21 +29,29 @@ FONT :: #load("../fonts/Inter-Medium.ttf")
 Tab :: enum {
 	Graph,
 	Showcase,
+	Design,
 }
 
 // In Tab order.
-TAB_LABELS := []string{"Graph", "Showcase"}
+TAB_LABELS := []string{"Graph", "Showcase", "Design"}
 
 main :: proc() {
 	shot := false
 	tab := Tab.Graph
 	start_theme: Maybe(Theme_Source)
+	start_design := ""
 	for a in os.args[1:] {
+		if strings.has_prefix(a, "--design=") {
+			start_design = a[len("--design="):]
+			continue
+		}
 		switch a {
 		case "--shot":
 			shot = true
 		case "--showcase":
 			tab = .Showcase
+		case "--lab":
+			tab = .Design
 		case "--theme=omarchy":
 			start_theme = .Omarchy
 		case "--theme=system":
@@ -56,9 +69,6 @@ main :: proc() {
 
 	sc := showcase_init()
 
-	ui.theme.gap_md = 8
-	ui.theme.panel_w = 280
-
 	ui.init({
 		title      = "odin-ui",
 		width      = 1180,
@@ -72,9 +82,13 @@ main :: proc() {
 	})
 	defer ui.shutdown()
 
-	ui.load_font_data(ui.theme.font_title, ui.theme.size_title, FONT)
-	ui.load_font_data(ui.theme.font_body, ui.theme.size_body, FONT)
-	ui.load_font_data(ui.theme.font_small, ui.theme.size_small, FONT)
+	// Designs name it; the first font registered is also the fallback.
+	ui.register_font("Inter-Medium", FONT)
+
+	lab: Lab
+	lab_init(&lab, start_design)
+	defer lab_destroy(&lab)
+	ui.apply_design(lab.design, nil)
 
 	th: Theming
 	theming_init(&th)
@@ -100,6 +114,7 @@ main :: proc() {
 		}
 		ui.zoom_shortcuts()
 		theming_update(&th)
+		lab_update(&lab, &th)
 		if tab == .Graph {
 			graph_input(&g, &drag_id)
 		} else {
@@ -123,6 +138,9 @@ main :: proc() {
 				case .Graph:
 					build_panel(&g)
 				case .Showcase:
+					build_showcase(&sc, &th)
+				case .Design:
+					lab_panel(&lab, &th)
 					build_showcase(&sc, &th)
 				}
 				ui.element_end()

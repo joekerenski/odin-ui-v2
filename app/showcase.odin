@@ -4,6 +4,7 @@ package main
 // trying. Add a card to play with a widget; the state lives in `Showcase`.
 
 import ui "../ui"
+import clay "../deps/clay"
 import "core:fmt"
 
 Showcase :: struct {
@@ -16,10 +17,13 @@ Showcase :: struct {
 	choice:   int,
 	page:     int,
 	selected: int, // list row, -1 none
+	switched: bool,
+	picked:   ui.Color,
+	across:   bool, // the motion card's puck is on the right
 }
 
 showcase_init :: proc() -> Showcase {
-	return {rgb = {110, 170, 255}, alpha = 1, choice = 1, page = 1, selected = -1}
+	return {rgb = {110, 170, 255}, alpha = 1, choice = 1, page = 1, selected = -1, switched = true, picked = {230, 120, 90, 255}}
 }
 
 @(private = "file")
@@ -58,6 +62,14 @@ build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 			ui.element_end()
 		}
 		ui.dim(fmt.tprintf("clicks: %d   (accent counts 10)", sc.clicks))
+		ui.dim("Held states, without the pointer:")
+		if ui.row_begin("sc_states_row", {gap = ui.theme.gap_md}) {
+			ui.button("sc_st_hover", "Hover", {force = .Hover})
+			ui.button("sc_st_press", "Pressed", {force = .Press})
+			ui.button("sc_st_acc_hover", "Accent hover", {accent = true, force = .Hover})
+			ui.button("sc_st_acc_press", "Accent pressed", {accent = true, force = .Press})
+			ui.element_end()
+		}
 		ui.element_end()
 	}
 
@@ -67,7 +79,25 @@ build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 			sc.segment = ui.tabs("sc_segments", SEGMENTS, sc.segment)
 			ui.element_end()
 		}
-		ui.dim(fmt.tprintf("toggle %v, segment %s", sc.toggled, SEGMENTS[sc.segment]))
+		sc.switched = ui.toggle_switch("sc_switch", "A switch: the knob slides with the change duration and bounce", sc.switched)
+		ui.dim(fmt.tprintf("toggle %v, switch %v, segment %s", sc.toggled, sc.switched, SEGMENTS[sc.segment]))
+		ui.element_end()
+	}
+
+	if ui.card_begin("sc_motion", "Motion", "Something that moves, with the design's change duration and bounce.") {
+		if ui.row_begin("sc_motion_row", {gap = ui.theme.gap_md}) {
+			if ui.button("sc_motion_go", "Send it across", {accent = true}) {
+				sc.across = !sc.across
+			}
+			ui.dim(fmt.tprintf("%.0f ms, bounce %.2f", ui.theme.motion.change * 1000, ui.theme.motion.bounce))
+			ui.element_end()
+		}
+		puck_track(sc)
+		ui.element_end()
+	}
+
+	if ui.card_begin("sc_picker", "Color picker", "Hue, saturation and brightness. The Design tab edits colors with it.") {
+		sc.picked, _ = ui.color_picker("sc_color", sc.picked)
 		ui.element_end()
 	}
 
@@ -108,10 +138,12 @@ build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 	}
 
 	if ui.card_begin("sc_type", "Typography") {
-		ui.title("Title, 28")
-		ui.body("Body, 16: the quick brown fox jumps over the lazy dog.")
-		ui.dim("Dim, 14: secondary text and hints.")
-		ui.section("SECTION, 14")
+		t := ui.theme
+		ui.title(fmt.tprintf("Title, %d", t.size_title))
+		ui.heading(fmt.tprintf("Heading, %d: card titles", t.size_heading))
+		ui.body(fmt.tprintf("Body, %d: the quick brown fox jumps over the lazy dog.", t.size_body))
+		ui.dim(fmt.tprintf("Small, %d: secondary text and hints.", t.size_small))
+		ui.section(fmt.tprintf("SECTION, %d", t.size_small))
 		ui.body("Latin-1 and symbols: café, naïve, 25 €, ← ↑ → ↓, ✓ ×, “quotes” – dashes …")
 		ui.element_end()
 	}
@@ -148,11 +180,10 @@ build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 	if ui.card_begin("sc_list", "A long list", "Enough rows to scroll. Click one to select it.") {
 		for i in 0 ..< LIST_ROWS {
 			id := fmt.tprintf("sc_row_%d", i)
-			bg := ui.Color{}
+			hot, held := ui.press_state(id)
+			bg := ui.feedback(id, ui.Color{}, ui.theme.surface_hot, hot, held)
 			if i == sc.selected {
 				bg = ui.theme.surface
-			} else if ui.hovered(id) {
-				bg = ui.theme.surface_hot
 			}
 			if ui.row_begin(id, {padding = 8, bg = bg, radius = ui.theme.radius_sm}) {
 				ui.body(fmt.tprintf("Row %d", i + 1))
@@ -168,11 +199,11 @@ build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 
 @(private = "file")
 theme_card :: proc(th: ^Theming) {
-	sub := "Built-in palettes. On Omarchy or macOS, the system theme shows up here too."
+	sub := "The design's dark and light colors. On Omarchy or macOS, the system theme shows up here too."
 	if th.omarchy {
-		sub = "Follows `omarchy theme set` live, or pick a built-in palette."
+		sub = "Follows `omarchy theme set` live, or pick the design's dark or light colors."
 	} else if th.system {
-		sub = "Follows the macOS appearance and accent color live, or pick a built-in palette."
+		sub = "Follows the macOS appearance and accent color live, or pick the design's dark or light colors."
 	}
 	if !ui.card_begin("sc_theme", "Theme", sub) {
 		return
@@ -199,4 +230,30 @@ theme_card :: proc(th: ^Theming) {
 		theming_set(th, sources[picked])
 	}
 	ui.element_end()
+}
+
+// A track with a puck that springs to the other end.
+@(private = "file")
+puck_track :: proc(sc: ^Showcase) {
+	PUCK :: 26
+	id := "sc_motion_track"
+	box, ok := ui.element_box(id)
+	x := ui.anim(id, 1 if sc.across else 0, ui.theme.motion.change, ui.theme.motion.bounce)
+	if ui.row_begin(id, {height = PUCK + 8, bg = ui.theme.surface, radius = ui.theme.radius_md}) {
+		if ok {
+			if clay.UI(clay.ID("sc_motion_puck"))(clay.ElementDeclaration{
+				layout          = {sizing = {width = clay.SizingFixed(PUCK), height = clay.SizingFixed(PUCK)}},
+				backgroundColor = ui.theme.accent,
+				cornerRadius    = clay.CornerRadiusAll(ui.theme.radius_md * 0.8),
+				floating = {
+					attachTo           = .Parent,
+					offset             = {4 + x * (box.width - PUCK - 8), 4},
+					zIndex             = 1,
+					pointerCaptureMode = .Passthrough,
+					clipTo             = .AttachedParent,
+				},
+			}) {}
+		}
+		ui.element_end()
+	}
 }
