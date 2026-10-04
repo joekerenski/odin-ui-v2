@@ -150,6 +150,11 @@ rich_select_none :: proc() {
 	s_sel = {}
 }
 
+// A drag selection is under way (the host can scroll its view when the pointer nears an edge).
+rich_dragging :: proc() -> bool {
+	return s_sel.dragging && mouse_down(.Left)
+}
+
 // The widest line of paragraph `id` as last laid out, 0 before it has been.
 rich_content_width :: proc(id: string) -> f32 {
 	r := s_rich[clay.ID(id).id]
