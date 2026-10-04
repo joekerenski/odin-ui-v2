@@ -5,6 +5,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:strings"
+import "core:time"
 import "core:unicode"
 import "core:unicode/utf8"
 
@@ -95,6 +96,9 @@ s_edit_clock: f64
 @(private)
 s_blink_from: f64
 
+@(private)
+s_edit_start: time.Tick
+
 focus :: proc(id: string) {
 	s_focus = clay.ID(id).id
 	s_focus_frame = s_frame
@@ -117,7 +121,9 @@ editing :: proc() -> bool {
 // Called by `frame`, after the frame stamp moves.
 @(private)
 edit_tick :: proc() {
-	s_edit_clock += f64(frame_dt)
+	// Wall time, not frame time: idle skips frames, and the caret still blinks on time.
+	if s_edit_start == {} { s_edit_start = time.tick_now() }
+	s_edit_clock = time.duration_seconds(time.tick_since(s_edit_start))
 	if s_focus != 0 && s_focus_frame + 1 < s_frame {
 		s_focus = 0
 	}
@@ -275,8 +281,14 @@ text_edit :: proc(id: string, e: ^Text_Edit, opts: Edit_Opts = {}) -> (res: Edit
 					layoutDirection = .TopToBottom,
 				},
 			}) {
-				blink := int((s_edit_clock - s_blink_from) / 0.53) % 2 == 0
+				phase := (s_edit_clock - s_blink_from) / 0.53
+				blink := int(phase) % 2 == 0
 				show_caret := has_focus && e.caret == e.anchor && blink
+				if has_focus && e.caret == e.anchor {
+					// The next blink, even when idle.
+					next := s_blink_from + (math.floor(phase) + 1) * 0.53
+					wake_at(time.tick_add(s_edit_start, time.Duration(next * f64(time.Second))))
+				}
 				first := clamp(int(e.scroll.y / ed.line_h), 0, len(ed.lines) - 1)
 				last := min(len(ed.lines), first + vis + 2)
 				if first > 0 {

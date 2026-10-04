@@ -55,6 +55,9 @@ Window_Desc :: struct {
 	// raylib's own log: every file load, texture upload and missing glyph.
 	// Off, only its errors print.
 	raylib_log: bool,
+	// Seconds of quiet (no input, nothing moving, no request_redraw) after which
+	// frames stop until something happens; 0 draws every frame. See idle.odin.
+	idle_after: f32,
 }
 
 quit_requested: bool
@@ -126,6 +129,8 @@ min_size: [2]f32
 init :: proc(desc: Window_Desc) {
 	target_fps = desc.target_fps
 	quit_requested = false
+	s_idle_after = desc.idle_after
+	s_idle_skipped = false
 
 	flags: rl.ConfigFlags
 	if desc.resizable do flags += {.WINDOW_RESIZABLE}
@@ -194,41 +199,25 @@ shutdown :: proc() {
 }
 
 // Poll, pace, and report whether the window is still open.
-// Call once per frame before building the UI.
+// Call once per frame before building the UI. With idle (Window_Desc.idle_after), it waits
+// here, tick by tick, while nothing would change on screen (see idle.odin).
 frame :: proc() -> bool {
-	when ODIN_OS == .Darwin {
-		darwin_pace()
-		frame_start = time.now()
-		rl.PollInputEvents()
-	} else when ODIN_OS == .Linux {
-		if wayland_active() {
-			wayland_pace()
-			frame_start = time.now()
-			rl.PollInputEvents()
-		} else {
-			frame_dt = rl.GetFrameTime()
-			if frame_dt <= 0 {
-				frame_dt = 1.0 / 60.0
-			}
-			frame_start = time.now()
+	for {
+		frame_wait()
+		if quit_requested || rl.WindowShouldClose() {
+			return false
 		}
-	} else {
-		frame_dt = rl.GetFrameTime()
-		if frame_dt <= 0 {
-			frame_dt = 1.0 / 60.0
+		zoom = fit_zoom(pending_zoom)
+		screen_w = f32(rl.GetScreenWidth()) / zoom
+		screen_h = f32(rl.GetScreenHeight()) / zoom
+		poll_input()
+		if !idle_skip() {
+			break
 		}
-		frame_start = time.now()
-	}
-	if quit_requested || rl.WindowShouldClose() {
-		return false
 	}
 
 	theme_tick(frame_dt)
 	anim_tick()
-	zoom = fit_zoom(pending_zoom)
-	screen_w = f32(rl.GetScreenWidth()) / zoom
-	screen_h = f32(rl.GetScreenHeight()) / zoom
-	poll_input()
 
 	// A new display scale (moved to another screen) or zoom draws text at
 	// new pixel sizes: the glyphs at the old ones go, and Clay re-measures.
@@ -252,6 +241,45 @@ frame :: proc() -> bool {
 	}
 
 	return true
+}
+
+// Waits for the frame's slot and polls the window's events.
+@(private)
+frame_wait :: proc() {
+	when ODIN_OS == .Darwin {
+		darwin_pace()
+		frame_start = time.now()
+		rl.PollInputEvents()
+	} else when ODIN_OS == .Linux {
+		if wayland_active() {
+			// Idle, no frame callback comes (nothing was committed): the wait gives up after
+			// 100 ms, so input is looked at ten times a second.
+			wayland_pace()
+			frame_start = time.now()
+			rl.PollInputEvents()
+		} else {
+			raylib_wait()
+		}
+	} else {
+		raylib_wait()
+	}
+}
+
+// raylib's own loop (X11, Windows): EndDrawing waits and polls; an idle tick, which doesn't
+// draw, sleeps a 60 Hz tick and polls itself.
+@(private)
+raylib_wait :: proc() {
+	if s_idle_skipped {
+		time.sleep(time.Second / 60)
+		rl.PollInputEvents()
+		frame_dt = 1.0 / 60.0
+	} else {
+		frame_dt = rl.GetFrameTime()
+		if frame_dt <= 0 {
+			frame_dt = 1.0 / 60.0
+		}
+	}
+	frame_start = time.now()
 }
 
 fps :: proc() -> i32 {

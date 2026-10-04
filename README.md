@@ -26,6 +26,10 @@ Raylib on its own misses fast trackpad clicks, blurs fullscreen on Retina, and d
 - Input is polled after the wait, not right after the swap, so a frame draws input that is ~1 ms old instead of a frame old. On macOS `end_draw` swaps with `SwapScreenBuffer` instead of `EndDrawing`, which would poll a second time and eat raylib's key-press edges.
 - Fullscreen on an adaptive-refresh screen (ProMotion, adaptive sync) runs on a fixed deadline grid instead. The panel scans out directly and refreshes when a frame lands, which made `CVDisplayLink` report our own presents back (ticks 2–11 ms apart). The frame wakes just early enough for its recent peak work, polls, draws, flushes, sleeps to the deadline with `mach_wait_until`, then swaps. The thread is time-constrained in that mode; without it the wake is ~1 ms late and jittery. Swap-to-swap spread at 60 went from ~10 ms to 0.03 ms. Before macOS 14 there is no view link and the grid is the clock everywhere.
 
+## Idle
+
+With `Window_Desc.idle_after` (seconds), `ui.frame` stops returning while nothing on screen would change, so the app neither lays out nor draws and the last frame stays up: the GPU rests. A frame is drawn on input (pointer, buttons, keys held or pressed, typed text, the wheel) or a size change; while a spring, a scroll's easing or a theme fade is moving; for `idle_after` seconds after the last of those (Clay's transitions finish in that time); when the app calls `ui.request_redraw()` (each frame while it has visible work under way, like text streaming in) or a time it asked for with `ui.wake_at` arrives (a text field asks for its caret's next blink); and at least once a second. Idle, the loop still wakes each display tick to look at input. With the composer focused, an idle yapper draws about 2 frames a second instead of 120.
+
 ## Linux (Wayland)
 
 GLFW uses its Wayland backend when `WAYLAND_DISPLAY` is set, and X11 otherwise. Under X11 the loop is plain raylib with vsync.
