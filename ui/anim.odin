@@ -172,6 +172,21 @@ scroll_to_end :: proc(id: string) {
 	}
 }
 
+// Move what container `id` shows by `dy` at once, easing in progress kept: when
+// rows above the view grow or shrink (a list that lays out only what's visible,
+// measuring rows as they come into view), the reader stays where they were.
+scroll_shift :: proc(id: string, dy: f32) {
+	eid := clay.ID(id)
+	data := clay.GetScrollContainerData(eid)
+	if !data.found || dy == 0 {
+		return
+	}
+	data.scrollPosition.y += dy
+	if s, ok := &s_scrolls[eid.id]; ok {
+		s.target += dy
+	}
+}
+
 // Put the bottom of the content in view at once, no easing (opening a log at
 // its end).
 scroll_end_now :: proc(id: string) {
