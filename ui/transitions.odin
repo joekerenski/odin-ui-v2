@@ -62,7 +62,12 @@ fade_exit_final :: proc "c" (
 	return out
 }
 
-fade_transition :: proc(duration: f32 = 0.18) -> clay.TransitionElementConfig {
+// A fade in when the element appears. It disappears at once, unless `fade_out`: an element
+// fading out is no longer declared, so Clay draws its last frame again, with the text pointers
+// that frame had. Text made for that frame (tprintf, a temp string, anything freed or reused
+// since) is then garbage, drawn as boxes. Fade out only what shows text that outlives the fade
+// (string constants, strings the app keeps).
+fade_transition :: proc(duration: f32 = 0.18, fade_out := false) -> clay.TransitionElementConfig {
 	return clay.TransitionElementConfig{
 		duration   = duration,
 		properties = {.OverlayColor},
@@ -76,7 +81,7 @@ fade_transition :: proc(duration: f32 = 0.18) -> clay.TransitionElementConfig {
 			trigger         = .TriggerOnFirstParentFrame,
 		},
 		exit = {
-			setFinalState = fade_exit_final,
+			setFinalState = fade_exit_final if fade_out else nil,
 			trigger       = .TriggerWhenParentExits,
 		},
 	}
