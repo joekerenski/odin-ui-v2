@@ -49,15 +49,18 @@ anim :: proc(id: string, target: f32, duration: f32, bounce: f32 = 0, channel: u
 
 // One frame of a damped spring toward `target`. The natural frequency makes
 // a critically damped spring settle (to about 1%) in `duration`; `bounce`
-// lowers the damping. Integrated in small steps, so a long frame stays stable.
+// lowers the damping. Integrated in steps short against both the frame and
+// the spring (omega*h <= 0.5), so a long frame or a stiff spring stays
+// stable. NaN durations or values snap to the target instead of sticking.
 spring_step :: proc(x, v: ^f32, target, duration, bounce, dt: f32) {
-	if duration <= 0.001 || dt <= 0 {
+	if !(duration > 0.001) || !(dt > 0) || !finite(x^) || !finite(v^) {
 		x^, v^ = target, 0
 		return
 	}
+	dt := min(dt, 0.25) // after a stall, don't step for seconds
 	omega := 2 * math.PI / duration
 	zeta := 1 - math.clamp(bounce, 0, 0.95)
-	steps := max(1, int(math.ceil(dt * 240)))
+	steps := max(1, int(math.ceil(dt * max(240, 2 * omega))))
 	h := dt / f32(steps)
 	for _ in 0 ..< steps {
 		acc := -omega * omega * (x^ - target) - 2 * zeta * omega * v^
@@ -67,6 +70,11 @@ spring_step :: proc(x, v: ^f32, target, duration, bounce, dt: f32) {
 	if math.abs(x^ - target) < 1e-4 && math.abs(v^) < 1e-3 {
 		x^, v^ = target, 0
 	}
+}
+
+@(private)
+finite :: proc(f: f32) -> bool {
+	return !math.is_nan(f) && !math.is_inf(f)
 }
 
 // Called by `frame`: a new frame stamp, and values nobody asked for during

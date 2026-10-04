@@ -57,7 +57,12 @@ lab_init :: proc(lab: ^Lab, start: string) {
 	if !found && start != "" {
 		fmt.eprintfln("design %q not found in %s", start, lab.dir)
 	}
-	lab_load(lab, idx if found else -1)
+	if !lab_load(lab, idx if found else -1) {
+		// Never run on a zeroed design: fall back to the built-in one.
+		status := strings.clone(lab.status, context.temp_allocator)
+		lab_load(lab, -1)
+		set_status(lab, status)
+	}
 }
 
 lab_destroy :: proc(lab: ^Lab) {
@@ -90,8 +95,7 @@ lab_update :: proc(lab: ^Lab, th: ^Theming) {
 				if lab_dirty(lab) {
 					lab.mtime = mt
 					set_status(lab, "Changed on disk. Save to overwrite, or Revert to load it.")
-				} else {
-					lab_load(lab, lab.current)
+				} else if lab_load(lab, lab.current) {
 					set_status(lab, "Reloaded from disk.")
 				}
 			}
@@ -327,27 +331,38 @@ type_section :: proc(lab: ^Lab) {
 	}
 }
 
-// A slider per token; seconds show as milliseconds.
+// A slider per token; seconds show as milliseconds. A value is snapped to
+// the slider's step only when the slider moves it, so opening the panel
+// doesn't rewrite a hand-edited 0.125 (and make the design dirty).
 @(private = "file")
 token_sliders :: proc(prefix: string, ts: []ui.Token) {
 	for t in ts {
 		id := fmt.tprintf("%s_%s", prefix, t.key)
+		cur := ui.token_get(t)
 		if t.unit == "ms" {
-			v := ui.slider(id, t.label, ui.token_get(t) * 1000, t.lo * 1000, t.hi * 1000, "%.0f ms")
-			ui.token_set(t, f32(int(v + 0.5)) / 1000)
+			if v := ui.slider(id, t.label, cur * 1000, t.lo * 1000, t.hi * 1000, "%.0f ms"); v != cur * 1000 {
+				ui.token_set(t, f32(int(v + 0.5)) / 1000)
+			}
 		} else if t.whole {
-			ui.token_set(t, ui.slider(id, t.label, ui.token_get(t), t.lo, t.hi, "%.0f"))
+			if v := ui.slider(id, t.label, cur, t.lo, t.hi, "%.0f"); v != cur {
+				ui.token_set(t, v)
+			}
 		} else if t.hi - t.lo <= 2 {
-			ui.token_set(t, f32(int(ui.slider(id, t.label, ui.token_get(t), t.lo, t.hi, "%.2f") * 100 + 0.5)) / 100)
+			if v := ui.slider(id, t.label, cur, t.lo, t.hi, "%.2f"); v != cur {
+				ui.token_set(t, f32(int(v * 100 + 0.5)) / 100)
+			}
 		} else {
-			ui.token_set(t, f32(int(ui.slider(id, t.label, ui.token_get(t), t.lo, t.hi, "%.0f") + 0.5)))
+			if v := ui.slider(id, t.label, cur, t.lo, t.hi, "%.0f"); v != cur {
+				ui.token_set(t, f32(int(v + 0.5)))
+			}
 		}
 	}
 }
 
 // --- files ------------------------------------------------------------------------
 
-lab_load :: proc(lab: ^Lab, index: int) {
+// False when the file doesn't parse; the working copy stays as it was.
+lab_load :: proc(lab: ^Lab, index: int) -> bool {
 	d: ui.Design
 	ok := true
 	if index < 0 {
@@ -365,7 +380,11 @@ lab_load :: proc(lab: ^Lab, index: int) {
 		if !ok {
 			ui.design_destroy(&d)
 			set_status(lab, fmt.tprintf("Could not load %s.toml; see the terminal.", lab.files[index]))
-			return
+			if index == lab.current {
+				// A bad reload: try again on the next change, not every poll.
+				lab.mtime, _ = os.modification_time_by_path(path)
+			}
+			return false
 		}
 		lab.mtime, _ = os.modification_time_by_path(path)
 	}
@@ -375,6 +394,7 @@ lab_load :: proc(lab: ^Lab, index: int) {
 	delete(lab.saved)
 	lab.saved = ui.design_to_toml(lab.design)
 	set_status(lab, "")
+	return true
 }
 
 @(private = "file")
@@ -395,11 +415,18 @@ lab_save :: proc(lab: ^Lab, index: int) {
 // follows, so the two match.
 @(private = "file")
 lab_save_new :: proc(lab: ^Lab) {
-	base := slug(lab.design.name)
-	for n := 2; n < 1000; n += 1 {
-		if _, taken := slice.linear_search(lab.files[:], base); !taken {
-			break
+	// Taken ignores case (APFS does) and checks the disk, not just the list.
+	taken :: proc(lab: ^Lab, base: string) -> bool {
+		for f in lab.files {
+			if strings.equal_fold(f, base) {
+				return true
+			}
 		}
+		p, _ := os.join_path({lab.dir, fmt.tprintf("%s.toml", base)}, context.temp_allocator)
+		return os.exists(p)
+	}
+	base := slug(lab.design.name)
+	for n := 2; taken(lab, base); n += 1 {
 		base = fmt.tprintf("%s-%d", slug(lab.design.name), n)
 	}
 	ui.design_set_string(&lab.design.name, base)

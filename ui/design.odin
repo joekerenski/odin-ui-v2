@@ -1,6 +1,7 @@
 package ui
 
 import "core:fmt"
+import "core:math"
 import "core:os"
 import "core:reflect"
 import "core:strconv"
@@ -385,8 +386,9 @@ parse_design :: proc(text: string, dir: string = "", allocator := context.alloca
 	d = default_design(allocator)
 	d.dir = strings.clone(dir, allocator)
 	section := ""
-	text := text
+	text := strings.trim_prefix(text, "\ufeff") // a BOM, from Windows editors
 	line_no := 0
+	reset: [Theme_Mode]bool
 	for raw in strings.split_lines_iterator(&text) {
 		line_no += 1
 		line := strings.trim_space(strip_comment(raw))
@@ -395,12 +397,19 @@ parse_design :: proc(text: string, dir: string = "", allocator := context.alloca
 		}
 		if line[0] == '[' && line[len(line) - 1] == ']' {
 			section = strings.trim_space(line[1:len(line) - 1])
-			// A mode's section replaces the built-in colors, overrides too.
+			// A mode's first section replaces the built-in colors, overrides
+			// too, whichever of [mode] and [mode.palette] comes first.
 			switch section {
-			case "dark":
-				d.dark = {base = {mode = .Dark}}
-			case "light":
-				d.light = {base = {mode = .Light}}
+			case "dark", "dark.palette":
+				if !reset[.Dark] {
+					d.dark = {base = {mode = .Dark}}
+					reset[.Dark] = true
+				}
+			case "light", "light.palette":
+				if !reset[.Light] {
+					d.light = {base = {mode = .Light}}
+					reset[.Light] = true
+				}
 			}
 			continue
 		}
@@ -455,15 +464,30 @@ parse_design :: proc(text: string, dir: string = "", allocator := context.alloca
 			fmt.eprintfln("ui: design line %d: unknown or bad [%s] %s = %s", line_no, section, key, value)
 		}
 	}
-	ok = d.dark.base.background.a > 0 && d.dark.base.foreground.a > 0 && d.light.base.background.a > 0 && d.light.base.foreground.a > 0
+	ok = true
+	for mode in Theme_Mode {
+		b := color_set(&d, mode).base
+		ok &&= b.background.a > 0 && b.foreground.a > 0 && b.accent.a > 0
+	}
 	if !ok {
-		fmt.eprintln("ui: design needs background and foreground for both dark and light")
+		fmt.eprintln("ui: design needs background, foreground and accent for both dark and light")
 	}
 	return
 }
 
+// Written to a temporary file and renamed over `path`, so a crash or a full
+// disk never leaves a half-written design for a hot-reloading reader.
 save_design :: proc(d: Design, path: string) -> bool {
-	return os.write_entire_file(path, design_to_toml(d, context.temp_allocator)) == nil
+	tmp := strings.concatenate({path, ".tmp"}, context.temp_allocator)
+	if os.write_entire_file(tmp, design_to_toml(d, context.temp_allocator)) != nil {
+		os.remove(tmp)
+		return false
+	}
+	if os.rename(tmp, path) != nil {
+		os.remove(tmp)
+		return false
+	}
+	return true
 }
 
 design_to_toml :: proc(d: Design, allocator := context.allocator) -> string {
@@ -522,6 +546,11 @@ parse_hex :: proc(s: string) -> (c: Color, ok: bool) {
 	if len(s) != 6 && len(s) != 8 {
 		return
 	}
+	for ch in s {
+		if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f' || ch >= 'A' && ch <= 'F') {
+			return
+		}
+	}
 	v, v_ok := strconv.parse_u64_of_base(s, 16)
 	if !v_ok {
 		return
@@ -548,10 +577,15 @@ set_token :: proc(ptr: ^$T, key, value: string) -> bool {
 	for t in tokens(ptr) {
 		if t.key == key {
 			v, ok := strconv.parse_f32(value)
-			if ok {
-				token_set(t, v)
+			if !ok || math.is_nan(v) || math.is_inf(v) {
+				return false
 			}
-			return ok
+			// Held to the editor's range: a 0px font or a 0s spring breaks things.
+			if t.hi > t.lo {
+				v = clamp(v, t.lo, t.hi)
+			}
+			token_set(t, v)
+			return true
 		}
 	}
 	return false
@@ -567,12 +601,18 @@ set_field :: proc(ptr: rawptr, T: typeid, key: string, c: Color) -> bool {
 	return true
 }
 
-// Drop a # comment, but not a # inside quotes (colors).
+// Drop a # comment, but not a # inside quotes (colors) or after a \ there.
 @(private)
 strip_comment :: proc(line: string) -> string {
-	quoted := false
+	quoted, escaped := false, false
 	for ch, i in line {
+		if escaped {
+			escaped = false
+			continue
+		}
 		switch ch {
+		case '\\':
+			escaped = quoted
 		case '"':
 			quoted = !quoted
 		case '#':
@@ -584,9 +624,14 @@ strip_comment :: proc(line: string) -> string {
 	return line
 }
 
+// A "string" with its escapes undone (the writer uses %q), temp allocated.
+// Anything else comes back as it is.
 @(private)
 unquote :: proc(s: string) -> string {
 	if len(s) >= 2 && s[0] == '"' && s[len(s) - 1] == '"' {
+		if res, _, ok := strconv.unquote_string(s, context.temp_allocator); ok {
+			return res
+		}
 		return s[1:len(s) - 1]
 	}
 	return s

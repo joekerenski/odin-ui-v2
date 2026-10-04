@@ -62,15 +62,16 @@ drag_update :: proc(id: string) -> bool {
 }
 
 // Map mouse X across `id`'s box to [lo, hi]. No-op when not dragging this id.
-drag_value_x :: proc(id: string, value, lo, hi: f32) -> f32 {
+drag_value_x :: proc(id: string, value, lo, hi: f32, inset: f32 = 0) -> f32 {
 	if !drag_update(id) {
 		return value
 	}
 	box, ok := element_box(id)
-	if !ok || box.width <= 0 {
+	if !ok || box.width <= 2 * inset {
 		return value
 	}
-	t := math.clamp((input.mouse_x - box.x) / box.width, 0, 1)
+	// `inset`: the track's ends sit this far in from the box (a knob's radius).
+	t := math.clamp((input.mouse_x - box.x - inset) / (box.width - 2 * inset), 0, 1)
 	return lo + t * (hi - lo)
 }
 
