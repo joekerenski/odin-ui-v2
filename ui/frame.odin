@@ -13,7 +13,7 @@ import rlgl "../deps/raylib/rlgl"
 
 Region_Box :: clay.BoundingBox
 
-// Window, frame loop, Clay lifecycle, and the font atlas.
+// Window, frame loop, Clay lifecycle, and font slots (glyphs.odin draws them).
 //
 // The app owns the loop:
 //
@@ -90,10 +90,10 @@ fps_acc: f32
 fps_frames: int
 
 // A font comes from a file (`path`, owned) or from memory (`data`, borrowed:
-// typically #load'ed, so it lives as long as the program). Kept so the font
-// can be re-rasterized when the display scale or zoom changes.
+// typically #load'ed, so it lives as long as the program). Its glyphs are
+// rasterized on demand at each size drawn (see glyphs.odin).
 Font_Slot :: struct {
-	font: rl.Font,
+	face: Face_Id,
 	size: u16,
 	path: string,
 	data: []u8,
@@ -105,7 +105,7 @@ fonts: [dynamic]Font_Slot
 @(private)
 shapes_tex: rl.Texture2D
 
-// Pixels per point at which fonts were last rasterized (display scale * zoom).
+// Pixels per point the glyph cache holds (display scale * zoom).
 @(private)
 loaded_scale: f32
 
@@ -177,15 +177,11 @@ shutdown :: proc() {
 		wayland_stop()
 	}
 	for &f in fonts {
-		if f.font.glyphCount > 0 {
-			rl.UnloadFont(f.font)
-		}
 		delete(f.path)
 	}
 	delete(fonts)
 	fonts = nil
-	delete(font_codepoints)
-	font_codepoints = nil
+	glyphs_teardown()
 	custom_teardown()
 	anim_teardown()
 	design_teardown()
@@ -234,12 +230,13 @@ frame :: proc() -> bool {
 	screen_h = f32(rl.GetScreenHeight()) / zoom
 	poll_input()
 
-	// A new display scale (moved to another screen) or zoom re-rasterizes
-	// the fonts, so glyphs stay one texel per pixel.
+	// A new display scale (moved to another screen) or zoom draws text at
+	// new pixel sizes: the glyphs at the old ones go, and Clay re-measures.
 	scale := raster_scale()
-	if math.abs(scale - loaded_scale) > 0.001 && len(fonts) > 0 {
+	if math.abs(scale - loaded_scale) > 0.001 {
 		loaded_scale = scale
-		reload_fonts()
+		glyph_cache_clear()
+		s_text_cache_full = true
 	}
 
 	// One-frame rate until the first half-second average exists.
@@ -407,21 +404,15 @@ is_fullscreen :: proc() -> bool {
 	}
 }
 
-glyph_font :: proc(id: u16) -> rl.Font {
-	if int(id) >= len(fonts) {
-		return {}
-	}
-	return fonts[id].font
-}
-
-// Rasterize at fontSize * display scale so each glyph texel is one framebuffer
-// pixel when drawn at `size` in point space. Filter is bilinear with no mips:
-// trilinear mipmaps are what softens UI text.
+// Glyphs are rasterized at fontSize * display scale, so each texel is one
+// framebuffer pixel when drawn at `size` in point space.
 load_font :: proc(font_id: u16, size: u16, path: cstring) {
 	f := reset_font_slot(font_id, size)
 	f.path = strings.clone(string(path))
-	f.font = rasterize(f^)
-	loaded_scale = raster_scale()
+	f.face = face_from_path(f.path)
+	if f.face == NO_FACE {
+		warn_font(f^)
+	}
 }
 
 // Same from TTF/OTF bytes, e.g. `#load("fonts/Inter-Medium.ttf")`, so the
@@ -429,97 +420,38 @@ load_font :: proc(font_id: u16, size: u16, path: cstring) {
 load_font_data :: proc(font_id: u16, size: u16, data: []u8) {
 	f := reset_font_slot(font_id, size)
 	f.data = data
-	f.font = rasterize(f^)
-	loaded_scale = raster_scale()
+	f.face = face_from_data(data)
+	if f.face == NO_FACE {
+		warn_font(f^)
+	}
 }
 
+// Faces stay loaded until shutdown (another slot may share one).
 @(private)
 reset_font_slot :: proc(font_id: u16, size: u16) -> ^Font_Slot {
 	ensure_font_slot(font_id)
 	f := &fonts[font_id]
-	if f.font.glyphCount > 0 {
-		rl.UnloadFont(f.font)
-	}
 	delete(f.path)
-	f^ = {size = size}
+	f^ = {face = NO_FACE, size = size}
 	return f
 }
 
-// The size to draw (and measure) text at, in layout units. The atlas holds
-// glyphs at round(size * raster_scale) pixels; drawing at exactly that many
-// pixels maps one texel to one pixel. Drawing at the nominal size instead
-// resamples every glyph: at a 1.25 display scale 14pt needs 17.5px against an
-// 18px atlas, and the 0.97x minification is what blurred text. So a 14pt
-// label draws at 14.4pt there, and at exactly 14pt at 1x and 2x.
+// The size to draw (and measure) text at, in layout units. Glyphs are
+// rasterized at round(size * raster_scale) pixels, so that is the size text
+// draws at: at a 1.25 display scale 14pt is 17.5px, drawn as 18px, so a 14pt
+// label draws at 14.4pt there, and at exactly 14pt at 1x and 2x. Resampling
+// glyphs to the nominal size instead is what blurs text.
 text_draw_size :: proc(font_id: u16, font_size: u16) -> f32 {
-	if int(font_id) >= len(fonts) {
+	if slot_face(font_id) == NO_FACE {
 		return f32(font_size)
 	}
-	f := fonts[font_id]
-	if f.font.glyphCount <= 0 || f.size == 0 {
-		return f32(font_size)
-	}
-	return f32(font_size) / f32(f.size) * f32(f.font.baseSize) / raster_scale()
-}
-
-@(private)
-reload_fonts :: proc() {
-	for &f in fonts {
-		if f.path == "" && len(f.data) == 0 {
-			continue
-		}
-		if f.font.glyphCount > 0 {
-			rl.UnloadFont(f.font)
-		}
-		f.font = rasterize(f)
-	}
-}
-
-// ASCII, Latin-1, and the punctuation and symbols UI text tends to use.
-// Anything outside this set, or missing from the font file, draws as '?'
-// (raylib logs how many were found).
-@(private)
-font_codepoints: [dynamic]rune
-
-@(private)
-codepoints :: proc() -> []rune {
-	if len(font_codepoints) == 0 {
-		for r in rune(32) ..= 126 do append(&font_codepoints, r)
-		for r in rune(160) ..= 255 do append(&font_codepoints, r)
-		append(&font_codepoints,
-			'–', '—', '‘', '’', '“', '”', '•', '…', '€',
-			'←', '↑', '→', '↓', '−', '≤', '≥', '✓', '✕')
-	}
-	return font_codepoints[:]
-}
-
-@(private)
-rasterize :: proc(slot: Font_Slot) -> rl.Font {
-	px := i32(math.round(f32(slot.size) * raster_scale()))
-	if px < 1 {
-		px = i32(slot.size)
-	}
-	cps := codepoints()
-	font: rl.Font
-	if len(slot.data) > 0 {
-		font = rl.LoadFontFromMemory(".ttf", raw_data(slot.data), i32(len(slot.data)), px, raw_data(cps), i32(len(cps)))
-	} else {
-		cstr := strings.clone_to_cstring(slot.path)
-		defer delete(cstr)
-		font = rl.LoadFontEx(cstr, px, raw_data(cps), i32(len(cps)))
-	}
-	if font.glyphCount > 0 {
-		rl.SetTextureFilter(font.texture, .BILINEAR)
-	} else {
-		fmt.eprintln("ui: font failed to load:", slot.path if slot.path != "" else "(from memory)")
-	}
-	return font
+	return slot_px(font_id, font_size) / raster_scale()
 }
 
 @(private)
 ensure_font_slot :: proc(id: u16) {
 	for len(fonts) <= int(id) {
-		append(&fonts, Font_Slot{})
+		append(&fonts, Font_Slot{face = NO_FACE})
 	}
 }
 
@@ -712,8 +644,7 @@ stats :: proc() -> Stats {
 	}
 }
 
-// Match DrawTextEx: advances from the atlas, scaled by the draw size over
-// baseSize (see text_draw_size), spacing added once per codepoint.
+// Matches draw_text: rounded pixel advances, spacing added per codepoint.
 @(private)
 measure_text :: proc "c" (
 	text: clay.StringSlice,
@@ -721,9 +652,6 @@ measure_text :: proc "c" (
 	userData: rawptr,
 ) -> clay.Dimensions {
 	context = runtime.default_context()
-	if int(config.fontId) >= len(fonts) || fonts[config.fontId].font.glyphCount <= 0 {
-		return {width = f32(text.length) * f32(config.fontSize) * 0.5, height = f32(config.fontSize)}
-	}
 	s := string(text.chars[:text.length])
 	return {
 		width  = text_width(s, config.fontId, config.fontSize, f32(config.letterSpacing)),
@@ -732,48 +660,34 @@ measure_text :: proc "c" (
 }
 
 // The width `s` draws at in layout units, as Clay measures it: the same
-// sum of advances DrawTextEx makes.
+// sum of advances draw_text makes.
 text_width :: proc(s: string, font_id: u16, font_size: u16, letter_spacing: f32 = 0) -> f32 {
-	if int(font_id) >= len(fonts) || fonts[font_id].font.glyphCount <= 0 {
+	face := slot_face(font_id)
+	if face == NO_FACE {
 		return f32(utf8.rune_count_in_string(s)) * f32(font_size) * 0.5
 	}
-	font := fonts[font_id].font
+	px := slot_px(font_id, font_size)
 	width, spacing: f32
 	for r in s {
-		width += glyph_advance(font, r)
-		// DrawTextEx adds spacing in points, outside the glyph scale.
+		if r == '\n' || r == '\r' {
+			continue
+		}
+		_, _, _, adv := rune_glyph(face, r, px)
+		width += adv
 		spacing += letter_spacing
 	}
-	return width * text_scale(font_id, font_size) + spacing
+	return width / raster_scale() + spacing
 }
 
 // One codepoint's advance in layout units; text_width of a string is the
 // sum of these (with no letter spacing).
 rune_width :: proc(r: rune, font_id: u16, font_size: u16) -> f32 {
-	if int(font_id) >= len(fonts) || fonts[font_id].font.glyphCount <= 0 {
+	face := slot_face(font_id)
+	if face == NO_FACE {
 		return f32(font_size) * 0.5
 	}
-	return glyph_advance(fonts[font_id].font, r) * text_scale(font_id, font_size)
-}
-
-// Atlas pixels to layout units at a font size.
-@(private)
-text_scale :: proc(font_id: u16, font_size: u16) -> f32 {
-	base := fonts[font_id].font.baseSize
-	return text_draw_size(font_id, font_size) / f32(base) if base != 0 else 1
-}
-
-// A glyph's advance in atlas pixels; a missing one is the fallback glyph's.
-@(private)
-glyph_advance :: proc(font: rl.Font, r: rune) -> f32 {
-	idx := int(rl.GetGlyphIndex(font, r))
-	if idx < 0 || idx >= int(font.glyphCount) {
-		return 0
-	}
-	if a := font.glyphs[idx].advanceX; a != 0 {
-		return f32(a)
-	}
-	return font.recs[idx].width
+	_, _, _, adv := rune_glyph(face, r, slot_px(font_id, font_size))
+	return adv / raster_scale()
 }
 
 @(private)

@@ -196,7 +196,7 @@ role_font :: proc(t: Typography, role: Type_Role) -> u16 {
 apply_font :: proc(role: Type_Role, face, dir: string, size: u16) {
 	a := &s_applied_fonts[role]
 	id := role_font(theme.typography, role)
-	if a.size == size && a.face == face && a.dir == dir && int(id) < len(fonts) && fonts[id].font.glyphCount > 0 {
+	if a.size == size && a.face == face && a.dir == dir && slot_face(id) != NO_FACE {
 		return
 	}
 	delete(a.face)
@@ -210,7 +210,7 @@ apply_font :: proc(role: Type_Role, face, dir: string, size: u16) {
 	if path != "" {
 		cpath := strings.clone_to_cstring(path, context.temp_allocator)
 		load_font(id, size, cpath)
-		if fonts[id].font.glyphCount > 0 {
+		if slot_face(id) != NO_FACE {
 			return
 		}
 		data = default_font_data()

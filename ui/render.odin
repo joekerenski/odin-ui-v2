@@ -2,7 +2,6 @@ package ui
 
 import clay "../deps/clay"
 import "core:math"
-import "core:strings"
 import rl "../deps/raylib"
 import rlgl "../deps/raylib/rlgl"
 
@@ -103,18 +102,7 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 			sync(&active, clips)
 			config := cmd.renderData.text
 			t := string(config.stringContents.chars[:config.stringContents.length])
-			if int(config.fontId) >= len(fonts) || fonts[config.fontId].font.glyphCount <= 0 {
-				continue
-			}
-			cstr := strings.clone_to_cstring(t, allocator)
-			rl.DrawTextEx(
-				fonts[config.fontId].font,
-				cstr,
-				{snap_px(b.x), snap_px(b.y)},
-				text_draw_size(config.fontId, config.fontSize),
-				f32(config.letterSpacing),
-				to_rl_color(apply_overlay(config.textColor, overlay)),
-			)
+			draw_text(t, b.x, b.y, config.fontId, config.fontSize, apply_overlay(config.textColor, overlay), f32(config.letterSpacing))
 		case .Image:
 			sync(&active, clips)
 			tex := (^rl.Texture2D)(cmd.renderData.image.imageData)
