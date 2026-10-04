@@ -100,6 +100,9 @@ s_key_down, s_key_pressed: bit_set[Key]
 @(private)
 s_key_mods: bit_set[Mod]
 
+@(private)
+s_key_repeat: bit_set[Key]
+
 EV_LEFT_DOWN, EV_LEFT_UP :: 1, 2
 EV_RIGHT_DOWN, EV_RIGHT_UP :: 3, 4
 EV_MOUSE_MOVED :: 5
@@ -140,6 +143,7 @@ input_monitor_invoke :: proc "c" (block: rawptr, event: rawptr) -> rawptr {
 	case EV_KEY_DOWN:
 		if k := key_from_event(obj); k != .Unknown {
 			s_key_down += {k}
+			s_key_repeat += {k}
 			// Auto-repeat is not a new press, same as raylib's IsKeyPressed.
 			if !intrinsics.objc_send(bool, obj, "isARepeat") {
 				s_key_pressed += {k}
@@ -240,6 +244,10 @@ key_from_code :: proc(code: u16) -> Key {
 	case 0x06: return .Z
 	case 0x7A: return .F1
 	case 0x63: return .F3
+	case 0x73: return .Home
+	case 0x77: return .End
+	case 0x74: return .Page_Up
+	case 0x79: return .Page_Down
 	case 0x45: return .KP_Add
 	case 0x4E: return .KP_Subtract
 	case 0x52: return .KP_0
@@ -346,8 +354,10 @@ darwin_take_keys :: proc() -> bool {
 	}
 	input.keys_pressed = s_key_pressed
 	input.keys_down = s_key_down
+	input.keys_repeat = s_key_repeat
 	input.mods = s_key_mods
 	s_key_pressed = {}
+	s_key_repeat = {}
 	return true
 }
 

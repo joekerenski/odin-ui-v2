@@ -479,6 +479,21 @@ Scroll_Style :: struct {
 	gap:       u16,
 }
 
+Field_Style :: struct {
+	bg:           Color,
+	bg_hover:     Color,
+	border:       Color,
+	border_focus: Color,
+	text:         Color,
+	placeholder:  Color,
+	caret:        Color,
+	selection:    Color, // behind selected text; text keeps its color
+	radius:       f32,
+	pad_x:        u16,
+	pad_y:        u16,
+	line:         f32, // line height over the font's draw size
+}
+
 Widget_Styles :: struct {
 	button:   Button_Style,
 	toggle:   Toggle_Style,
@@ -490,6 +505,7 @@ Widget_Styles :: struct {
 	tab_bar:  Tab_Bar_Style,
 	card:     Card_Style,
 	scroll:   Scroll_Style,
+	field:    Field_Style,
 }
 
 styles: Widget_Styles
@@ -584,6 +600,20 @@ styles_from_theme :: proc(t: Theme) -> Widget_Styles {
 			min_thumb = 24,
 			padding   = u16(t.pad_md * 2),
 			gap       = u16(t.gap_md * 2),
+		},
+		field = {
+			bg           = t.surface,
+			bg_hover     = t.surface_hot,
+			border       = t.border,
+			border_focus = t.accent,
+			text         = t.text,
+			placeholder  = t.text_dim,
+			caret        = t.accent,
+			selection    = {t.accent.r, t.accent.g, t.accent.b, 90},
+			radius       = t.radius_sm,
+			pad_x        = u16(max(6, int(t.pad_md) - 2)),
+			pad_y        = 4,
+			line         = 1.45,
 		},
 	}
 }

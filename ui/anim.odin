@@ -93,6 +93,7 @@ anim_tick :: proc() {
 	}
 	scroll_tick()
 	picker_tick()
+	edit_tick()
 }
 
 @(private)

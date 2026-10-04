@@ -104,12 +104,18 @@ main :: proc() {
 		free_all(context.temp_allocator)
 		frame_n += 1
 
+		// While a text field has the keyboard, keys are typing: Escape
+		// leaves the field instead of quitting, and F is just an F.
 		if ui.key_pressed(.Escape) {
-			ui.request_quit()
-			break
+			if ui.editing() {
+				ui.blur()
+			} else {
+				ui.request_quit()
+				break
+			}
 		}
 		// Bare keys only: Cmd+N and friends belong to the system.
-		if ui.key_pressed_bare(.F) {
+		if ui.key_pressed_bare(.F) && !ui.editing() {
 			ui.toggle_fullscreen()
 		}
 		ui.zoom_shortcuts()

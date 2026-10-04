@@ -16,7 +16,15 @@ Input :: struct {
 	mouse_released: u8,
 	keys_pressed:   bit_set[Key],
 	keys_down:      bit_set[Key],
+	// Pressed, or auto-repeated while held: for editing keys (Backspace,
+	// arrows), where holding should keep going. keys_pressed never repeats.
+	keys_repeat:    bit_set[Key],
 	mods:           bit_set[Mod],
+	// Text typed this frame, in order, as the keyboard layout produced it
+	// (Shift, Option on macOS, dead keys). Control characters are left out;
+	// Enter, Tab and Backspace come in as keys.
+	chars:          [32]rune,
+	char_count:     int,
 }
 
 Mod :: enum u8 {
@@ -35,6 +43,7 @@ Key :: enum u16 {
 	A, B, C, D, E, F, G, H, I, J, K, L, M,
 	N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
 	F1, F3,
+	Home, End, Page_Up, Page_Down,
 	// By the character the key types in the current layout, not its position:
 	// Plus is whichever key types + or = (on a German layout, where US has ]).
 	// Pressed only; not tracked in keys_down.
@@ -67,6 +76,20 @@ key_pressed :: proc(k: Key) -> bool {
 key_down :: proc(k: Key) -> bool {
 	return k in input.keys_down
 }
+
+// Pressed this frame or auto-repeating: for keys that should keep acting
+// while held.
+key_repeat :: proc(k: Key) -> bool {
+	return k in input.keys_repeat
+}
+
+// The text typed this frame.
+typed :: proc() -> []rune {
+	return input.chars[:input.char_count]
+}
+
+// The platform's command modifier: Cmd on macOS, Ctrl elsewhere.
+PRIMARY_MOD :: Mod.Super when ODIN_OS == .Darwin else Mod.Ctrl
 
 // A press with no modifiers held: a bare shortcut, not Cmd+N.
 key_pressed_bare :: proc(k: Key) -> bool {

@@ -20,6 +20,10 @@ Showcase :: struct {
 	switched: bool,
 	picked:   ui.Color,
 	across:   bool, // the motion card's puck is on the right
+	line:     ui.Text_Edit,
+	note:     ui.Text_Edit,
+	sent:     int,
+	last:     ui.Text_Edit, // the last submitted line, shown read back
 }
 
 showcase_init :: proc() -> Showcase {
@@ -70,6 +74,21 @@ build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 			ui.button("sc_st_acc_press", "Accent pressed", {accent = true, force = .Press})
 			ui.element_end()
 		}
+		ui.element_end()
+	}
+
+	if ui.card_begin("sc_text", "Text fields", "One line submits on Enter. Many lines wrap and grow to six, then scroll; Enter sends, Shift+Enter breaks the line.") {
+		if r := ui.text_edit("sc_line", &sc.line, {placeholder = "One line: type, select, copy, paste, undo"}); r.submitted {
+			ui.edit_set(&sc.last, ui.edit_text(&sc.line))
+			ui.edit_clear(&sc.line)
+			sc.sent += 1
+		}
+		if r := ui.text_edit("sc_note", &sc.note, {multiline = true, enter_submits = true, placeholder = "Many lines"}); r.submitted {
+			ui.edit_set(&sc.last, ui.edit_text(&sc.note))
+			ui.edit_clear(&sc.note)
+			sc.sent += 1
+		}
+		ui.dim(fmt.tprintf("sent %d   last: %s", sc.sent, ui.edit_text(&sc.last)))
 		ui.element_end()
 	}
 

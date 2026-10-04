@@ -120,6 +120,16 @@ Widgets animate through `ui.anim(id, target, duration, bounce)`, a spring per wi
 
 `Button_Opts.force` shows a hover or press state without the pointer, for specimens like the Showcase's buttons card.
 
+## Text fields
+
+`ui.text_edit(id, &state, opts)` is a text field, one line or many (`multiline`, wrapping and growing to `lines` before it scrolls). The host owns the `ui.Text_Edit` and reads it back with `ui.edit_text`; the result says whether the text changed, Enter submitted it, or Escape cancelled.
+
+- **Keys** follow the platform: on macOS Option moves by word and Cmd by line, elsewhere Ctrl by word and Home/End by line. Cmd (Ctrl) with A, C, X, V and Z selects all, copies, cuts, pastes and undoes; Shift+Cmd+Z (Ctrl+Y) redoes. Undo takes back a word of typing at a time.
+- **The pointer** places the caret, drags a selection, double-clicks a word and triple-clicks a line, and shows the text cursor over a field.
+- **Focus**: one field has the keyboard. A click focuses or blurs; `ui.focus(id)` and `ui.blur()` do it from code, and `ui.editing()` tells the host to keep bare-key shortcuts out of the way while someone types.
+
+The field lays out its own lines with the same advances Clay measures (`ui.text_width`, `ui.rune_width`), so the caret and selection land on the glyphs. Typed text arrives in `ui.input.chars` (`ui.typed()`), as the keyboard layout produced it, and editing keys repeat while held (`ui.key_repeat`).
+
 ## Layout
 
 ```

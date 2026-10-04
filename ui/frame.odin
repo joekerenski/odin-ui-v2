@@ -351,6 +351,31 @@ set_clipboard :: proc(text: string) {
 	rl.SetClipboardText(strings.clone_to_cstring(text, context.temp_allocator))
 }
 
+// The clipboard's text, "" when it holds none. Temp allocated by default.
+get_clipboard :: proc(allocator := context.temp_allocator) -> string {
+	c := rl.GetClipboardText()
+	if c == nil {
+		return ""
+	}
+	return strings.clone(string(c), allocator)
+}
+
+// The mouse pointer's shape. A widget asks for one while it builds (the
+// text cursor over a field); the last ask of a frame wins, and a frame with
+// none goes back to the arrow.
+Cursor :: enum u8 {
+	Arrow,
+	Text,
+	Hand,
+}
+
+@(private)
+s_cursor_want, s_cursor_set: Cursor
+
+request_cursor :: proc(c: Cursor) {
+	s_cursor_want = c
+}
+
 toggle_fullscreen :: proc() {
 	when ODIN_OS == .Darwin {
 		darwin_toggle_fullscreen()
@@ -522,6 +547,18 @@ begin_layout :: proc() {
 end_layout :: proc() -> clay.ClayArray(clay.RenderCommand) {
 	cmds := clay.EndLayout(frame_dt)
 	last_cmd_count = int(cmds.length)
+	if s_cursor_want != s_cursor_set {
+		s_cursor_set = s_cursor_want
+		switch s_cursor_set {
+		case .Arrow:
+			rl.SetMouseCursor(.DEFAULT)
+		case .Text:
+			rl.SetMouseCursor(.IBEAM)
+		case .Hand:
+			rl.SetMouseCursor(.POINTING_HAND)
+		}
+	}
+	s_cursor_want = .Arrow
 	return cmds
 }
 
@@ -654,34 +691,56 @@ measure_text :: proc "c" (
 	if int(config.fontId) >= len(fonts) || fonts[config.fontId].font.glyphCount <= 0 {
 		return {width = f32(text.length) * f32(config.fontSize) * 0.5, height = f32(config.fontSize)}
 	}
-	font := fonts[config.fontId].font
 	s := string(text.chars[:text.length])
+	return {
+		width  = text_width(s, config.fontId, config.fontSize, f32(config.letterSpacing)),
+		height = text_draw_size(config.fontId, config.fontSize),
+	}
+}
+
+// The width `s` draws at in layout units, as Clay measures it: the same
+// sum of advances DrawTextEx makes.
+text_width :: proc(s: string, font_id: u16, font_size: u16, letter_spacing: f32 = 0) -> f32 {
+	if int(font_id) >= len(fonts) || fonts[font_id].font.glyphCount <= 0 {
+		return f32(utf8.rune_count_in_string(s)) * f32(font_size) * 0.5
+	}
+	font := fonts[font_id].font
 	width, spacing: f32
-	i := 0
-	for i < len(s) {
-		r, w := utf8.decode_rune_in_string(s[i:])
-		if w <= 0 {
-			break
-		}
-		idx := int(rl.GetGlyphIndex(font, r))
-		if idx >= 0 && idx < int(font.glyphCount) {
-			g := font.glyphs[idx]
-			if g.advanceX != 0 {
-				width += f32(g.advanceX)
-			} else {
-				width += font.recs[idx].width
-			}
-		}
+	for r in s {
+		width += glyph_advance(font, r)
 		// DrawTextEx adds spacing in points, outside the glyph scale.
-		spacing += f32(config.letterSpacing)
-		i += w
+		spacing += letter_spacing
 	}
-	size := text_draw_size(config.fontId, config.fontSize)
-	scale := f32(1)
-	if font.baseSize != 0 {
-		scale = size / f32(font.baseSize)
+	return width * text_scale(font_id, font_size) + spacing
+}
+
+// One codepoint's advance in layout units; text_width of a string is the
+// sum of these (with no letter spacing).
+rune_width :: proc(r: rune, font_id: u16, font_size: u16) -> f32 {
+	if int(font_id) >= len(fonts) || fonts[font_id].font.glyphCount <= 0 {
+		return f32(font_size) * 0.5
 	}
-	return {width = width * scale + spacing, height = size}
+	return glyph_advance(fonts[font_id].font, r) * text_scale(font_id, font_size)
+}
+
+// Atlas pixels to layout units at a font size.
+@(private)
+text_scale :: proc(font_id: u16, font_size: u16) -> f32 {
+	base := fonts[font_id].font.baseSize
+	return text_draw_size(font_id, font_size) / f32(base) if base != 0 else 1
+}
+
+// A glyph's advance in atlas pixels; a missing one is the fallback glyph's.
+@(private)
+glyph_advance :: proc(font: rl.Font, r: rune) -> f32 {
+	idx := int(rl.GetGlyphIndex(font, r))
+	if idx < 0 || idx >= int(font.glyphCount) {
+		return 0
+	}
+	if a := font.glyphs[idx].advanceX; a != 0 {
+		return f32(a)
+	}
+	return font.recs[idx].width
 }
 
 @(private)
@@ -719,6 +778,21 @@ poll_input :: proc() {
 	input.mouse_y /= zoom
 	input.mouse_delta_x /= zoom
 	input.mouse_delta_y /= zoom
+
+	// Text comes from GLFW's character callback everywhere (macOS too: the
+	// monitor passes key events on), which applies the layout, Option and
+	// dead keys. Cmd combinations type nothing.
+	input.char_count = 0
+	for r := rl.GetCharPressed(); r != 0; r = rl.GetCharPressed() {
+		// Control characters, and macOS's private-use function-key range.
+		if r < 0x20 || r == 0x7f || (r >= 0xf700 && r <= 0xf8ff) {
+			continue
+		}
+		if input.char_count < len(input.chars) {
+			input.chars[input.char_count] = r
+			input.char_count += 1
+		}
+	}
 	if took_keys {
 		return
 	}
@@ -727,6 +801,7 @@ poll_input :: proc() {
 	// ends inside one poll is lost here. macOS takes keys from the monitor.
 	input.keys_pressed = {}
 	input.keys_down = {}
+	input.keys_repeat = {}
 	input.mods = {}
 	if rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT) do input.mods += {.Shift}
 	if rl.IsKeyDown(.LEFT_CONTROL) || rl.IsKeyDown(.RIGHT_CONTROL) do input.mods += {.Ctrl}
@@ -750,6 +825,8 @@ poll_input :: proc() {
 	poll_key(.U, .U); poll_key(.V, .V); poll_key(.W, .W); poll_key(.X, .X)
 	poll_key(.Y, .Y); poll_key(.Z, .Z)
 	poll_key(.F1, .F1); poll_key(.F3, .F3)
+	poll_key(.Home, .HOME); poll_key(.End, .END)
+	poll_key(.Page_Up, .PAGE_UP); poll_key(.Page_Down, .PAGE_DOWN)
 	poll_key(.KP_Add, .KP_ADD); poll_key(.KP_Subtract, .KP_SUBTRACT); poll_key(.KP_0, .KP_0)
 
 	// raylib names keys by their US position, so on a German layout + comes
@@ -770,6 +847,9 @@ poll_input :: proc() {
 poll_key :: proc(k: Key, rk: rl.KeyboardKey) {
 	if rl.IsKeyPressed(rk) {
 		input.keys_pressed += {k}
+		input.keys_repeat += {k}
+	} else if rl.IsKeyPressedRepeat(rk) {
+		input.keys_repeat += {k}
 	}
 	if rl.IsKeyDown(rk) {
 		input.keys_down += {k}
