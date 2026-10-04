@@ -70,10 +70,16 @@ if need CormorantGaramond-Medium.ttf CormorantGaramond-SemiBold.ttf; then
 fi
 
 license newsreader Newsreader
-if need Newsreader-Regular.ttf Newsreader-Medium.ttf; then
+if need Newsreader-Regular.ttf Newsreader-Medium.ttf Newsreader-SemiBold.ttf; then
 	v=$(variable newsreader 'Newsreader[opsz,wght].ttf')
 	cut "$v" Newsreader-Regular.ttf wght=400 opsz=16
 	cut "$v" Newsreader-Medium.ttf wght=500 opsz=16
+	cut "$v" Newsreader-SemiBold.ttf wght=600 opsz=16
+fi
+if need Newsreader-Italic.ttf Newsreader-SemiBoldItalic.ttf; then
+	v=$(variable newsreader 'Newsreader-Italic[opsz,wght].ttf')
+	cut "$v" Newsreader-Italic.ttf wght=400 opsz=16
+	cut "$v" Newsreader-SemiBoldItalic.ttf wght=600 opsz=16
 fi
 
 license jetbrainsmono JetBrainsMono

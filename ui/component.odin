@@ -90,6 +90,8 @@ Custom_Kind :: enum u8 {
 	// Horizontal gradient through `stops`, as a pill (ends rounded to half
 	// the height).
 	Gradient,
+	// A paragraph of rich text: the data is a Rich_Layout (rich.odin).
+	Rich,
 }
 
 GRADIENT_STOPS :: 7
@@ -119,12 +121,14 @@ custom_setup :: proc() {
 
 @(private)
 custom_teardown :: proc() {
+	rich_teardown()
 	delete(s_custom)
 	s_custom = nil
 }
 
 @(private)
 custom_begin_frame :: proc() {
+	rich_begin_frame()
 	clear(&s_custom)
 	if cap(s_custom) < CUSTOM_RESERVE {
 		reserve(&s_custom, CUSTOM_RESERVE)
@@ -246,5 +250,7 @@ dispatch_custom :: proc(cmd: ^clay.RenderCommand) {
 		)
 	case .Gradient:
 		draw_gradient_pill(box, data.stops[:data.count])
+	case .Rich:
+		draw_rich((^Rich_Layout)(data), box)
 	}
 }

@@ -172,6 +172,16 @@ scroll_to_end :: proc(id: string) {
 	}
 }
 
+// Put the bottom of the content in view at once, no easing (opening a log at
+// its end).
+scroll_end_now :: proc(id: string) {
+	data := clay.GetScrollContainerData(clay.ID(id))
+	if !data.found {
+		return
+	}
+	scroll_jump(id, -max(0, data.contentDimensions.height - data.scrollContainerDimensions.height))
+}
+
 // Whether container `id` is scrolled (or headed) to within `slack` points
 // of its end, or its content fits: the reader is following along.
 scroll_at_end :: proc(id: string, slack: f32 = 4) -> bool {

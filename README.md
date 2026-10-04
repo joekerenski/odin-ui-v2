@@ -130,6 +130,10 @@ Widgets animate through `ui.anim(id, target, duration, bounce)`, a spring per wi
 
 The field lays out its own lines with the same advances Clay measures (`ui.text_width`, `ui.rune_width`), so the caret and selection land on the glyphs. Typed text arrives in `ui.input.chars` (`ui.typed()`), as the keyboard layout produced it, and editing keys repeat while held (`ui.key_repeat`).
 
+## Rich text
+
+`ui.rich_text(id, spans, opts)` is a paragraph of spans in different styles, wrapped together as one text: each `ui.Span` has its text and a `Span_Style` (font slot, size, color, a rounded box behind it, underline, strikethrough, and a link id). Clay wraps each text element on its own, so the paragraph lays out its own lines at the width its element had last frame (`opts.width` before it has one, else the last paragraph's), and draws them as one Custom element. Baselines line up across fonts on a line, a span with a box (inline code) takes a few points of room on either side, a word too wide for the line breaks between characters, and spaces where a line breaks hang. The result has the height, and the link under the pointer and the one clicked this frame, with the hand cursor over links. Layouts are kept per id while the text, fonts, sizes and width stay the same; colors and decorations can change every frame without a relayout. Italic and bold are font slots of their own: `fetch-fonts.sh` cuts Newsreader Italic, SemiBold and SemiBold Italic for this.
+
 ## Layout
 
 ```
