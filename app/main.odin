@@ -11,6 +11,7 @@ package main
 //   ./run.sh --lab            start on the Design tab
 //   ./run.sh --design=soft    start with designs/soft.toml (default: console)
 //   ./run.sh --theme=light    start with colors: omarchy, system, dark, or light
+//   ./run.sh --raylib-log     print raylib's full log (default: errors only)
 //
 // Drag a node to pin it under the cursor. Link is a mode: the next node you
 // click is tied to the selection. Esc quits, F toggles fullscreen, space pauses,
@@ -37,6 +38,7 @@ TAB_LABELS := []string{"Graph", "Showcase", "Design"}
 
 main :: proc() {
 	shot := false
+	raylib_log := false
 	tab := Tab.Graph
 	start_theme: Maybe(Theme_Source)
 	start_design := ""
@@ -48,6 +50,8 @@ main :: proc() {
 		switch a {
 		case "--shot":
 			shot = true
+		case "--raylib-log":
+			raylib_log = true
 		case "--showcase":
 			tab = .Showcase
 		case "--lab":
@@ -79,6 +83,7 @@ main :: proc() {
 		target_fps = 60,
 		min_width  = 720,
 		min_height = 480,
+		raylib_log = raylib_log,
 	})
 	defer ui.shutdown()
 

@@ -52,6 +52,9 @@ Window_Desc :: struct {
 	// would get smaller than this.
 	min_width:  i32,
 	min_height: i32,
+	// raylib's own log: every file load, texture upload and missing glyph.
+	// Off, only its errors print.
+	raylib_log: bool,
 }
 
 quit_requested: bool
@@ -133,6 +136,7 @@ init :: proc(desc: Window_Desc) {
 	when ODIN_OS != .Darwin {
 		flags += {.VSYNC_HINT}
 	}
+	rl.SetTraceLogLevel(.ALL if desc.raylib_log else .ERROR)
 	rl.SetConfigFlags(flags)
 	rl.InitWindow(desc.width, desc.height, desc.title)
 	rl.SetExitKey(rl.KeyboardKey.KEY_NULL)
