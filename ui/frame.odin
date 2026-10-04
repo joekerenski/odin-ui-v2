@@ -611,15 +611,11 @@ set_interactions_enabled :: proc(enabled: bool) {
 	s_interactions_enabled = enabled
 }
 
+// A press over the element this frame. Hit-tested by Clay like `hovered`, so
+// a click on an open menu doesn't also land on what's under it, and a
+// control scrolled out of its container's clip can't be clicked.
 clicked :: proc(id: string, index: u32 = 0) -> bool {
-	if !s_interactions_enabled || !mouse_pressed(.Left) {
-		return false
-	}
-	box, ok := element_box(id, index)
-	if !ok {
-		return false
-	}
-	return mouse_in_box(box)
+	return s_interactions_enabled && mouse_pressed(.Left) && element_hovered(id, index)
 }
 
 Stats :: struct {

@@ -45,15 +45,16 @@ dragging :: proc(id: string) -> bool {
 @(private)
 _drag_id: u32
 
-// Call once per interactive control during build. Starts a drag on press-in-box,
-// clears on release. Returns true while this id owns the drag.
+// Call once per interactive control during build. Starts a drag on a press
+// over the element (as Clay sees it: not under a capturing floating menu, not
+// scrolled out of its clip), clears on release. Returns true while this id
+// owns the drag.
 drag_update :: proc(id: string) -> bool {
 	hash := clay.ID(id).id
-	box, ok := element_box(id)
 	if mouse_released(.Left) && _drag_id == hash {
 		_drag_id = 0
 	}
-	if _drag_id == 0 && mouse_pressed(.Left) && ok && mouse_in_box(box) {
+	if _drag_id == 0 && mouse_pressed(.Left) && element_hovered(id) {
 		if s_interactions_enabled {
 			_drag_id = hash
 		}

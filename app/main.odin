@@ -198,7 +198,7 @@ graph_input :: proc(g: ^Graph, drag_id: ^int) {
 		} else {
 			drag_id^ = -1
 		}
-	} else if canvas_ok && ui.mouse_in_box(canvas) && ui.mouse_pressed() {
+	} else if canvas_ok && ui.hovered("Canvas") && ui.mouse_pressed() {
 		hit := node_at(g, world)
 		if hit >= 0 && g.linking && g.selected >= 0 && hit != g.selected {
 			add_edge(g, g.selected, hit)

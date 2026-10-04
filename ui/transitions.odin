@@ -67,6 +67,9 @@ fade_transition :: proc(duration: f32 = 0.18) -> clay.TransitionElementConfig {
 		duration   = duration,
 		properties = {.OverlayColor},
 		handler    = fade_handler,
+		// Nothing moves, so a menu fading in already takes the pointer (and
+		// keeps clicks off what's under it). Exiting still lets it through.
+		interactionHandling = .AllowInteractionsWhileTransitioningPosition,
 		enter = {
 			setInitialState = fade_enter_initial,
 			// Fire even when the parent also just appeared (modals, menus).
