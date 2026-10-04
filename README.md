@@ -107,7 +107,7 @@ The **Design** tab edits a design live next to the showcase. It covers:
 - a font and a size for each role
 - every shape and motion token
 
-It saves to `designs/` next to the binary, and reloads the file when it changes on disk, so a text editor works too. Included: `console` (the default), `soft` and `compact`, and three serif reading designs for the yapper chat app, `yapper-ink` (Newsreader, warm), `yapper-night` (EB Garamond, cool) and `yapper-graphite` (Spectral, neutral). `--design=NAME` starts with one. Fonts in `fonts/` show up in the font menus. A design that uses one refers to it by path, so ship the font with the design.
+It saves to `designs/` next to the binary, and reloads the file when it changes on disk, so a text editor works too. Included: `console` (the default), `soft` and `compact`, and three serif reading designs for the yapper chat app, `yapper-ink` (Newsreader, warm), `yapper-night` (EB Garamond, cool) and `yapper-graphite` (Spectral, neutral). `--design=NAME` starts with one. Fonts in `fonts/` show up in the font menus. A design that uses one refers to it by path, so ship the font with the design. Only Inter is committed; `./fetch-fonts.sh` downloads the others from Google Fonts (curl, plus `fonttools` to cut static instances), and a design whose font is missing falls back to Inter.
 
 ### Motion
 
@@ -141,11 +141,11 @@ designs/       design files: console (default), soft, compact
 deps/clay/     Clay bindings + built static libs
 deps/raylib/   raylib bindings + the Linux and macOS static libs and their build scripts
 tools/         vsync_probe
-fonts/
+fonts/         Inter (committed); ./fetch-fonts.sh adds the rest
 ```
 
 The app owns the loop (`ui.init`, `for ui.frame()`, `ui.shutdown`). Widgets read an input snapshot and emit Clay. They do not call raylib. The graph does, in the canvas region, before `ui.render` paints the panel on top.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Bundled third-party pieces keep their own licenses: Clay is zlib ([deps/clay/LICENSE.md](deps/clay/LICENSE.md)), and the fonts are SIL OFL 1.1, each with its license next to it in [fonts/](fonts): [Inter](https://github.com/rsms/inter), [EB Garamond](https://github.com/octaviopardo/EBGaramond12), [Cormorant Garamond](https://github.com/CatharsisFonts/Cormorant), [Spectral](https://github.com/productiontype/Spectral), [Newsreader](https://github.com/productiontype/Newsreader) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono). The Cormorant, EB Garamond, Newsreader and JetBrains Mono files are static instances (Regular, Medium, SemiBold) cut from the variable fonts on [Google Fonts](https://github.com/google/fonts) with `fonttools varLib.instancer`, because raylib draws only a variable font's default instance (Cormorant's is Light). raylib is zlib ([deps/raylib/LICENSE.md](deps/raylib/LICENSE.md)).
+MIT, see [LICENSE](LICENSE). Bundled third-party pieces keep their own licenses: Clay is zlib ([deps/clay/LICENSE.md](deps/clay/LICENSE.md)), and the fonts are SIL OFL 1.1, each with its license next to it in [fonts/](fonts): [Inter](https://github.com/rsms/inter), [EB Garamond](https://github.com/octaviopardo/EBGaramond12), [Cormorant Garamond](https://github.com/CatharsisFonts/Cormorant), [Spectral](https://github.com/productiontype/Spectral), [Newsreader](https://github.com/productiontype/Newsreader) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono). All but Inter are fetched by `./fetch-fonts.sh`, not committed. The Cormorant, EB Garamond, Newsreader and JetBrains Mono files are static instances (Regular, Medium, SemiBold) it cuts from the variable fonts on [Google Fonts](https://github.com/google/fonts) with `fonttools varLib.instancer`, because raylib draws only a variable font's default instance (Cormorant's is Light). raylib is zlib ([deps/raylib/LICENSE.md](deps/raylib/LICENSE.md)).

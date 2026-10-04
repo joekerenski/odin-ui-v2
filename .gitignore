@@ -4,5 +4,8 @@ graph-shot.png
 *.dSYM/
 .DS_Store
 *.log
-fonts/Regulator-Nova-Medium.ttf
+# Fonts come from ./fetch-fonts.sh; only Inter, which the demo embeds, is committed.
+fonts/*
+!fonts/Inter-Medium.ttf
+!fonts/Inter-LICENSE.txt
 /*.o
