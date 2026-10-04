@@ -17,7 +17,8 @@ import "core:unicode/utf8"
 //
 // Keys follow the platform. On macOS Option moves by word and Cmd by line,
 // Cmd+Up/Down to either end; elsewhere Ctrl moves by word, Home/End by line
-// and Ctrl+Home/End to either end. Cmd (Ctrl) with A, C, X, V, Z selects
+// and Ctrl+Home/End to either end. A one-line field leaves Up, Down and the
+// page keys to the host, for a list under a search field. Cmd (Ctrl) with A, C, X, V, Z selects
 // all, copies, cuts, pastes and undoes; Shift+Cmd+Z (Ctrl+Y) redoes. A
 // double click selects a word, a triple click the line.
 //
@@ -511,6 +512,8 @@ edit_keys :: proc(ed: ^Editor, opts: Edit_Opts) -> (res: Edit_Result) {
 		} else {
 			move(e, line_end(ed, k) if by_line else word_right(s, e.caret) if word else next_rune(s, e.caret), shift)
 		}
+	// One line: Up, Down and the page keys are the host's (a palette's list).
+	case !opts.multiline && (key_repeat(.Up) || key_repeat(.Down) || key_repeat(.Page_Up) || key_repeat(.Page_Down)):
 	case key_repeat(.Up):
 		if by_line {
 			move(e, 0, shift)

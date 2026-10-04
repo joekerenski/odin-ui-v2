@@ -156,6 +156,37 @@ scroll_jump :: proc(id: string, y: f32) {
 	}
 }
 
+// Ease scroll container `id` so `y` points from the top of its content
+// are above the view (clamped to the content). Takes effect next frame.
+scroll_to :: proc(id: string, y: f32) {
+	if s, ok := &s_scrolls[clay.ID(id).id]; ok {
+		s.target = -max(0, y)
+	}
+}
+
+// Ease to the bottom of the content; called every frame while content grows
+// (a streaming reply), it keeps the view pinned there.
+scroll_to_end :: proc(id: string) {
+	if s, ok := &s_scrolls[clay.ID(id).id]; ok {
+		s.target = -1e9 // clamped to the content's end next frame
+	}
+}
+
+// Whether container `id` is scrolled (or headed) to within `slack` points
+// of its end, or its content fits: the reader is following along.
+scroll_at_end :: proc(id: string, slack: f32 = 4) -> bool {
+	data := clay.GetScrollContainerData(clay.ID(id))
+	if !data.found {
+		return true
+	}
+	end := max(0, data.contentDimensions.height - data.scrollContainerDimensions.height)
+	y := -data.scrollPosition.y
+	if s, ok := s_scrolls[clay.ID(id).id]; ok {
+		y = -s.target
+	}
+	return y >= end - slack
+}
+
 @(private)
 scroll_tick :: proc() {
 	stale := make([dynamic]u32, context.temp_allocator)
