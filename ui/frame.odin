@@ -188,6 +188,7 @@ shutdown :: proc() {
 	fonts = nil
 	glyphs_teardown()
 	custom_teardown()
+	idle_teardown()
 	anim_teardown()
 	design_teardown()
 	delete(clay_memory)
@@ -531,6 +532,7 @@ begin_layout :: proc() {
 	}
 	clay.SetLayoutDimensions({screen_w, screen_h})
 	clay.SetPointerState({input.mouse_x, input.mouse_y}, mouse_down(.Left))
+	idle_begin_frame()
 	restore := scroll_before_wheel()
 	clay.UpdateScrollContainers(false, {input.wheel_x, input.wheel_y}, frame_dt)
 	scroll_after_wheel(restore)

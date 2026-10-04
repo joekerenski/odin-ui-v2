@@ -95,6 +95,15 @@ rich_text :: proc(id: string, spans: []Span, opts := Rich_Opts{}) -> (res: Rich_
 		r.sel_lo, r.sel_hi = selection_in(eid.id, index, len(r.text))
 	}
 
+	if laid {
+		// Links are hover zones: the pointer crossing one draws a frame even when idle.
+		for f in r.frags {
+			if r.spans[f.span].link != 0 {
+				l := r.lines[f.line]
+				hover_zone({box.x + f.x, box.y + l.y, f.w, l.h})
+			}
+		}
+	}
 	if laid && s_interactions_enabled {
 		local := [2]f32{input.mouse_x - box.x, input.mouse_y - box.y}
 		over := element_hovered(id)

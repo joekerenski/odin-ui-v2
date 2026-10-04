@@ -67,7 +67,10 @@ spring_step :: proc(x, v: ^f32, target, duration, bounce, dt: f32) {
 		v^ += acc * h
 		x^ += v^ * h
 	}
-	if math.abs(x^ - target) < 1e-4 && math.abs(v^) < 1e-3 {
+	// At rest within a tolerance that grows with the value: a float near 4000 can't come
+	// within 1e-4 of anything, and a spring that never rests keeps idle from starting.
+	scale := max(1, math.abs(target))
+	if math.abs(x^ - target) < 1e-4 * scale && math.abs(v^) < 1e-3 * scale {
 		x^, v^ = target, 0
 	}
 }
