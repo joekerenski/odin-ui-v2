@@ -5,6 +5,7 @@ import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:math"
+import "core:os"
 import "core:time"
 import rl "../deps/raylib"
 import rlgl "../deps/raylib/rlgl"
@@ -117,6 +118,12 @@ init :: proc(desc: Window_Desc) {
 	rl.SetTraceLogLevel(.ALL if desc.raylib_log else .ERROR)
 	rl.SetConfigFlags(flags)
 	rl.InitWindow(desc.width, desc.height, desc.title)
+	if !rl.IsWindowReady() {
+		// No window to draw in (no display, or a locked screen on macOS): say so rather than
+		// crash on the first GL call.
+		fmt.eprintln("ui: couldn't open a window (no display, or the screen is locked?)")
+		os.exit(1)
+	}
 	rl.SetExitKey(rl.KeyboardKey.KEY_NULL)
 	min_size = {f32(desc.min_width), f32(desc.min_height)}
 	if desc.min_width > 0 || desc.min_height > 0 {
