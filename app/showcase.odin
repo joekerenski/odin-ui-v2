@@ -163,6 +163,7 @@ build_showcase :: proc(sc: ^Showcase, th: ^Theming) {
 		ui.body(fmt.tprintf("Body, %d: the quick brown fox jumps over the lazy dog.", t.size_body))
 		ui.dim(fmt.tprintf("Small, %d: secondary text and hints.", t.size_small))
 		ui.section(fmt.tprintf("SECTION, %d", t.size_small))
+		ui.code(fmt.tprintf("mono, %d: for i in 0 ..< n { sum += xs[i] } // code", t.size_mono))
 		ui.body("Latin-1 and symbols: café, naïve, 25 €, ← ↑ → ↓, ✓ ×, “quotes” – dashes …")
 		ui.element_end()
 	}

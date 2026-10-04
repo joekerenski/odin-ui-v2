@@ -1,0 +1,54 @@
+# odin-ui design: load with ui.load_design, see ui/design.odin.
+
+name = "yapper-ink"
+
+[type]
+font_title = "../fonts/CormorantGaramond-SemiBold.ttf"
+font_heading = "../fonts/CormorantGaramond-SemiBold.ttf"
+font_body = "../fonts/Newsreader-Regular.ttf"
+font_small = "Inter-Medium"
+font_mono = "../fonts/JetBrainsMono-Regular.ttf"
+size_title = 34
+size_heading = 28
+size_body = 19
+size_small = 13
+size_mono = 15
+
+[shape]
+radius_sm = 6
+radius_md = 10
+pad_md = 14
+gap_md = 10
+row_h = 32
+slider_h = 4
+panel_w = 280
+bar_h = 44
+content_w = 700
+
+[motion]
+hover = 0.14
+change = 0.26
+enter = 0.3
+scroll = 0.16
+bounce = 0.06
+press = 0.15
+
+[dark]
+background = "#141211"
+foreground = "#e8e0d2"
+accent = "#c9a46c"
+surface = "#26211d"
+border = "#2c2723"
+warning = "#e0a458"
+danger = "#d9766b"
+success = "#8fb38a"
+
+[light]
+background = "#f6f1e7"
+foreground = "#2b2622"
+accent = "#93672e"
+surface = "#e6dccb"
+border = "#ddd2bf"
+warning = "#b5761c"
+danger = "#b4473b"
+success = "#4f7f4a"

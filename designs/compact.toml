@@ -7,10 +7,12 @@ font_title = "Inter-Medium"
 font_heading = "Inter-Medium"
 font_body = "Inter-Medium"
 font_small = "Inter-Medium"
+font_mono = "../fonts/JetBrainsMono-Regular.ttf"
 size_title = 22
 size_heading = 14
 size_body = 13
 size_small = 12
+size_mono = 12
 
 [shape]
 radius_sm = 2

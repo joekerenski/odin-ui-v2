@@ -58,6 +58,7 @@ Type_Role :: enum u8 {
 	Heading,
 	Body,
 	Small,
+	Mono, // code
 }
 
 Typography :: struct {
@@ -65,10 +66,13 @@ Typography :: struct {
 	font_heading: u16 `design:"-"`,
 	font_body:    u16 `design:"-"`,
 	font_small:   u16 `design:"-"`,
+	font_mono:    u16 `design:"-"`,
+	// In Type_Role order: the Design tab pairs each role with its size.
 	size_title:   u16 `range:"16,48" label:"Title"`,
 	size_heading: u16 `range:"12,28" label:"Heading"`,
-	size_body:    u16 `range:"11,22" label:"Body"`,
+	size_body:    u16 `range:"11,24" label:"Body"`,
 	size_small:   u16 `range:"9,18" label:"Small"`,
+	size_mono:    u16 `range:"10,22" label:"Mono"`,
 }
 
 // How the UI moves. Durations are seconds, about the time a change takes to
@@ -152,10 +156,12 @@ TYPOGRAPHY_DEFAULT :: Typography {
 	font_heading = u16(Type_Role.Heading),
 	font_body    = u16(Type_Role.Body),
 	font_small   = u16(Type_Role.Small),
+	font_mono    = u16(Type_Role.Mono),
 	size_title   = 28,
 	size_heading = 17,
 	size_body    = 16,
 	size_small   = 14,
+	size_mono    = 14,
 }
 
 MOTION_DEFAULT :: Motion {

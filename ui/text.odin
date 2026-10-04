@@ -26,6 +26,11 @@ dim :: proc(s: string) {
 	text(s, theme.font_small, theme.size_small, theme.text_dim)
 }
 
+// Code, in the mono role's font.
+code :: proc(s: string, color: Color = theme.text) {
+	text(s, theme.font_mono, theme.size_mono, color)
+}
+
 section :: proc(s: string) {
 	text(s, theme.font_small, theme.size_small, theme.accent)
 }

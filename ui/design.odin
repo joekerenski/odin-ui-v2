@@ -50,6 +50,7 @@ ROLE_NAMES := [Type_Role]string {
 	.Heading = "heading",
 	.Body    = "body",
 	.Small   = "small",
+	.Mono    = "mono",
 }
 
 // The built-in design. Its strings are allocated; free with design_destroy.
@@ -139,6 +140,7 @@ apply_design :: proc(d: Design, mode: Maybe(Theme_Mode) = .Dark, fade: f32 = 0) 
 	theme.typography = d.typography
 	theme.font_title, theme.font_heading = ids.font_title, ids.font_heading
 	theme.font_body, theme.font_small = ids.font_body, ids.font_small
+	theme.font_mono = ids.font_mono
 	s_design_sets = {
 		.Dark  = d.dark,
 		.Light = d.light,
@@ -168,6 +170,8 @@ role_size :: proc(t: Typography, role: Type_Role) -> u16 {
 		return t.size_body
 	case .Small:
 		return t.size_small
+	case .Mono:
+		return t.size_mono
 	}
 	return t.size_body
 }
@@ -182,6 +186,8 @@ role_font :: proc(t: Typography, role: Type_Role) -> u16 {
 		return t.font_body
 	case .Small:
 		return t.font_small
+	case .Mono:
+		return t.font_mono
 	}
 	return t.font_body
 }

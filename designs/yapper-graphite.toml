@@ -1,0 +1,54 @@
+# odin-ui design: load with ui.load_design, see ui/design.odin.
+
+name = "yapper-graphite"
+
+[type]
+font_title = "../fonts/Spectral-Medium.ttf"
+font_heading = "../fonts/Spectral-Medium.ttf"
+font_body = "../fonts/Spectral-Regular.ttf"
+font_small = "Inter-Medium"
+font_mono = "../fonts/JetBrainsMono-Regular.ttf"
+size_title = 30
+size_heading = 26
+size_body = 21
+size_small = 13
+size_mono = 15
+
+[shape]
+radius_sm = 8
+radius_md = 12
+pad_md = 14
+gap_md = 10
+row_h = 32
+slider_h = 4
+panel_w = 280
+bar_h = 44
+content_w = 720
+
+[motion]
+hover = 0.12
+change = 0.24
+enter = 0.28
+scroll = 0.14
+bounce = 0.1
+press = 0.15
+
+[dark]
+background = "#111113"
+foreground = "#e4e4e7"
+accent = "#a99bd6"
+surface = "#202024"
+border = "#27272c"
+warning = "#e3b46b"
+danger = "#e07a7a"
+success = "#86c29b"
+
+[light]
+background = "#f7f7f8"
+foreground = "#1d1d22"
+accent = "#6a59b0"
+surface = "#e7e7eb"
+border = "#dedee3"
+warning = "#a8701a"
+danger = "#b8433f"
+success = "#3d8a5a"

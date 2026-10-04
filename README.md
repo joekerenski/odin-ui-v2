@@ -82,7 +82,7 @@ The demo app follows Omarchy when it is installed, the macOS appearance on a Mac
 
 ## Designs
 
-A design is the whole look and feel in one file: a font and size for each text role (title, heading, body, small), corner radii, padding, gaps and control sizes, motion, and colors for dark and light. Another project loads it:
+A design is the whole look and feel in one file: a font and size for each text role (title, heading, body, small, and mono for code), corner radii, padding, gaps and control sizes, motion, and colors for dark and light. Another project loads it:
 
 ```odin
 ui.register_font("Inter-Medium", #load("fonts/Inter-Medium.ttf"))
@@ -107,7 +107,7 @@ The **Design** tab edits a design live next to the showcase. It covers:
 - a font and a size for each role
 - every shape and motion token
 
-It saves to `designs/` next to the binary, and reloads the file when it changes on disk, so a text editor works too. Three designs are included: `console` (the default), `soft` and `compact`. `--design=NAME` starts with one. Fonts in `fonts/` show up in the font menus. A design that uses one refers to it by path, so ship the font with the design.
+It saves to `designs/` next to the binary, and reloads the file when it changes on disk, so a text editor works too. Included: `console` (the default), `soft` and `compact`, and three serif reading designs for the yapper chat app, `yapper-ink` (Newsreader, warm), `yapper-night` (EB Garamond, cool) and `yapper-graphite` (Spectral, neutral). `--design=NAME` starts with one. Fonts in `fonts/` show up in the font menus. A design that uses one refers to it by path, so ship the font with the design.
 
 ### Motion
 

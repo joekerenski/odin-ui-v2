@@ -1,0 +1,54 @@
+# odin-ui design: load with ui.load_design, see ui/design.odin.
+
+name = "yapper-night"
+
+[type]
+font_title = "../fonts/CormorantGaramond-SemiBold.ttf"
+font_heading = "../fonts/CormorantGaramond-SemiBold.ttf"
+font_body = "../fonts/EBGaramond-Regular.ttf"
+font_small = "../fonts/EBGaramond-Medium.ttf"
+font_mono = "../fonts/JetBrainsMono-Regular.ttf"
+size_title = 34
+size_heading = 28
+size_body = 21
+size_small = 16
+size_mono = 15
+
+[shape]
+radius_sm = 4
+radius_md = 8
+pad_md = 14
+gap_md = 10
+row_h = 32
+slider_h = 4
+panel_w = 280
+bar_h = 44
+content_w = 680
+
+[motion]
+hover = 0.16
+change = 0.28
+enter = 0.32
+scroll = 0.18
+bounce = 0
+press = 0.12
+
+[dark]
+background = "#0f1217"
+foreground = "#d9dde3"
+accent = "#8db5a3"
+surface = "#1c212a"
+border = "#232a35"
+warning = "#d9b26f"
+danger = "#d98080"
+success = "#8db5a3"
+
+[light]
+background = "#eef0ec"
+foreground = "#1f242b"
+accent = "#3f7a63"
+surface = "#dde2dc"
+border = "#d2d8d1"
+warning = "#9a6d1f"
+danger = "#a8443f"
+success = "#3f7a63"
