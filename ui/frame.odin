@@ -526,11 +526,35 @@ ensure_font_slot :: proc(id: u16) {
 @(private)
 clay_error :: proc "c" (data: clay.ErrorData) {
 	context = runtime.default_context()
+	if data.errorType == .TextMeasurementCapacityExceeded {
+		// begin_layout empties the cache; only this frame's text goes unmeasured.
+		s_text_cache_full = true
+		return
+	}
 	fmt.eprintln("clay:", data.errorType, string(data.errorText.chars[:data.errorText.length]))
 }
 
+// Clay caches the width of every text it measured, and drops a stale entry only when a
+// lookup happens to pass it. Text that changes every frame (a reply streaming in) adds an entry
+// per frame, so stale ones pile up until the cache is full and text stops being measured. So the
+// cache is big, emptied every TEXT_CACHE_FRAMES frames (re-measuring what's on screen once), and
+// emptied at once if it fills up anyway.
+@(private)
+TEXT_CACHE_WORDS :: 1 << 16
+
+@(private)
+TEXT_CACHE_FRAMES :: 120
+
+@(private)
+s_text_cache_full: bool
+
+@(private)
+s_text_cache_age: int
+
 @(private)
 clay_setup :: proc(desc: Window_Desc) {
+	// Before Initialize: the cache's arrays are sized then.
+	clay.SetMaxMeasureTextCacheWordCount(TEXT_CACHE_WORDS)
 	min_mem := clay.MinMemorySize()
 	clay_memory = make([]u8, int(min_mem))
 	arena := clay.CreateArenaWithCapacityAndMemory(c.size_t(min_mem), &clay_memory[0])
@@ -540,6 +564,11 @@ clay_setup :: proc(desc: Window_Desc) {
 
 begin_layout :: proc() {
 	custom_begin_frame()
+	s_text_cache_age += 1
+	if s_text_cache_full || s_text_cache_age >= TEXT_CACHE_FRAMES {
+		clay.ResetMeasureTextCache()
+		s_text_cache_full, s_text_cache_age = false, 0
+	}
 	clay.SetLayoutDimensions({screen_w, screen_h})
 	clay.SetPointerState({input.mouse_x, input.mouse_y}, mouse_down(.Left))
 	restore := scroll_before_wheel()
