@@ -92,6 +92,10 @@ Custom_Kind :: enum u8 {
 	Gradient,
 	// A paragraph of rich text: the data is a Rich_Layout (rich.odin).
 	Rich,
+	// The host draws it: `draw` is called with the data and the element's box, in
+	// layout units, clipped like the element. For a host's own Custom_Data, put it
+	// first in a struct of its own (as Rich_Layout does) and the pointer is both.
+	Draw,
 }
 
 GRADIENT_STOPS :: 7
@@ -104,6 +108,8 @@ Custom_Data :: struct {
 	// Gradient only.
 	stops:   [GRADIENT_STOPS]Color,
 	count:   u8,
+	// Draw only.
+	draw:    proc(data: ^Custom_Data, box: clay.BoundingBox),
 }
 
 // Backing store for Custom payloads. Capacity is reserved up front and only
@@ -252,5 +258,7 @@ dispatch_custom :: proc(cmd: ^clay.RenderCommand) {
 		draw_gradient_pill(box, data.stops[:data.count])
 	case .Rich:
 		draw_rich((^Rich_Layout)(data), box)
+	case .Draw:
+		if data.draw != nil { data.draw(data, box) }
 	}
 }
