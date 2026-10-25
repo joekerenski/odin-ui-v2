@@ -1,124 +1,109 @@
 # odin-ui-v2
 
-Clay layout, raylib drawing, one window loop. raylib is master at `debc1f6` (6.5-dev, after 6.2), vendored in `deps/raylib` with bindings checked against its headers and a Linux build that runs natively on Wayland (see [deps/raylib/README.md](deps/raylib/README.md)). Clay is [nicbarker/clay](https://github.com/nicbarker/clay) `e6cc369`, its current head: the bindings plus static libs built by `deps/clay/build.sh`.
+A native UI library in Odin for macOS and Linux: [Clay](https://github.com/nicbarker/clay) lays out, a small GPU renderer draws, and raylib provides the window, GL context and input. Clay is `e6cc369` (its current head) and raylib is master at `debc1f6` (6.5-dev), both vendored in `deps/` with their build scripts ([deps/raylib/README.md](deps/raylib/README.md)).
 
-The app has three tabs under a top bar. **Graph** is a force-directed graph: nodes repel, edges are springs, a weak pull keeps the cloud on the canvas, and the side panel drives the model. **Showcase** is a scrollable column of cards with every widget, a place to try things out ([app/showcase.odin](app/showcase.odin)); `./run.sh --showcase` starts there. **Design** edits the look and feel live and saves it as a design file (see [Designs](#designs)); `./run.sh --lab` starts there.
+The demo app has three tabs under a top bar. **Graph** is a force-directed graph driven by its side panel. **Showcase** is a column of cards with every widget ([app/showcase.odin](app/showcase.odin)). **Design** edits the look and feel live and saves it as a design file (see [Designs](#designs)).
 
 ```bash
-./run.sh              # build and run (Odin deletes the binary afterwards)
-./build.sh            # optimized standalone binary: ./graph
-./build.sh debug      # with symbols, for gdb/lldb: ./graph-debug
+./run.sh                  # build and run (Odin deletes the binary afterwards)
+./run.sh --showcase       # start on the Showcase tab (--lab: the Design tab)
+./run.sh --bench          # a scripted session, then the frame timing report
+./build.sh                # optimized standalone binary: ./graph
+./build.sh debug          # with symbols, for gdb/lldb: ./graph-debug
 ```
 
-The font, raylib and GLFW are built into the binary, so `./graph` runs from any directory. On Linux it links dynamically only against libc, `libX11` and `libwayland-client`, which any desktop has.
+[app/main.odin](app/main.odin) lists every flag. The fonts, raylib and GLFW are built into the binary, so `./graph` runs from any directory; on Linux it links dynamically only against libc, `libX11` and `libwayland-client`.
 
-Use Odin's [official release](https://github.com/odin-lang/Odin/releases) (built and tested with `dev-2026-09`). Text uses Odin's `vendor:stb/truetype`, whose library ships prebuilt for macOS and Windows; on Linux build it once with `make -C "$(odin root)/vendor/stb/src"`. Arch's `odin` package ships `vendor/` libraries as Git LFS pointer files, and Windows links raylib from the compiler.
+Use Odin's [official release](https://github.com/odin-lang/Odin/releases) (built with `dev-2026-10`). Text uses Odin's `vendor:stb/truetype`, which ships prebuilt for macOS; on Linux build it once with `make -C "$(odin root)/vendor/stb/src"`. Arch's `odin` package ships `vendor/` libraries as Git LFS pointer files, which don't link.
 
-On the Graph tab: drag a node. **Link** then click another node to tie it to the selection. **N** adds a node, **delete** removes the selection, **space** pauses, **F** is fullscreen, **esc** quits. **F3** hides the debug strip (frame timing, see [Frame timing](#frame-timing)). **Ctrl +/−/0** zooms the UI from 50% to 200% (**Cmd** on macOS); zooming in stops before the layout gets smaller than the 720×480 minimum window.
+On the Graph tab: drag a node; **Link**, then click another node to tie it to the selection. **N** adds a node, **delete** removes the selection, **space** pauses, **F** is fullscreen, **esc** quits, **F3** hides the debug strip. **Ctrl +/−/0** zooms the UI from 50% to 200% (**Cmd** on macOS); zooming in stops before the layout gets smaller than the minimum window.
+
+## The loop
+
+The app owns the loop:
+
+```odin
+ui.init(desc)
+for ui.frame() {
+	ui.begin_layout()
+	// widgets
+	cmds := ui.end_layout()
+	ui.begin_draw()
+	// host drawing (ui.draw_*), optionally clipped to an element
+	ui.render(&cmds)
+	ui.end_draw()
+}
+ui.shutdown()
+```
+
+`frame` waits for the frame's slot, then polls input, so a frame draws input as fresh as the wait allows. `Window_Desc.target_fps` 0 is 120 (`ui.DEFAULT_FPS`): a 60 Hz display runs at 60 and a faster one is held to 120; -1 follows the display at any rate.
 
 ## macOS
 
-Raylib on its own misses fast trackpad clicks, blurs fullscreen on Retina, and does not lock to ProMotion. This package patches those without forking raylib:
+raylib on its own misses fast trackpad clicks, blurs fullscreen on Retina, and does not lock to ProMotion. [ui/macos_darwin.odin](ui/macos_darwin.odin) patches those without forking raylib:
 
-- An `NSEvent` monitor records every mouse and key edge, then hands the event to GLFW unchanged. Raylib compares key state between polls, so a tap that starts and ends inside one frame never reads as pressed; the monitor keeps it.
-- Fullscreen is `[NSWindow toggleFullScreen:]`, so the 2x backing store stays. `ToggleFullscreen` is the path that drops the scale to 1x.
-- Swap interval stays off. The window view's display link (`NSView.displayLink`, macOS 14+) runs on its own thread; each tick bumps a counter and signals a semaphore, and the frame blocks until the counter has moved. `target_fps` 0 is 120 (`ui.DEFAULT_FPS`): a 60 Hz display runs at 60, and a faster one is held to 120; -1 follows the display at any rate. A lower cap waits N ticks (60 on a 120 Hz panel is every second tick).
-- Input is polled after the wait, not right after the swap, so a frame draws input that is ~1 ms old instead of a frame old. On macOS `end_draw` swaps with `SwapScreenBuffer` instead of `EndDrawing`, which would poll a second time and eat raylib's key-press edges.
-- Fullscreen on an adaptive-refresh screen (ProMotion, adaptive sync) runs on a fixed deadline grid instead. The panel scans out directly and refreshes when a frame lands, which made `CVDisplayLink` report our own presents back (ticks 2–11 ms apart). The frame wakes just early enough for its recent peak work, polls, draws, flushes, sleeps to the deadline with `mach_wait_until`, then swaps. The thread is time-constrained in that mode; without it the wake is ~1 ms late and jittery. Swap-to-swap spread at 60 went from ~10 ms to 0.03 ms. Before macOS 14 there is no view link and the grid is the clock everywhere.
+- An `NSEvent` monitor records every mouse and key edge, then hands the event to GLFW unchanged. raylib compares key state between polls, so a tap that starts and ends inside one frame would never read as pressed.
+- Fullscreen is `[NSWindow toggleFullScreen:]`, which keeps the 2x backing store; raylib's `ToggleFullscreen` drops it to 1x.
+- The clock is the window view's display link (`NSView.displayLink`, macOS 14+), on its own thread, with the swap interval off. A cap below the display's rate waits N ticks. `end_draw` swaps with `SwapScreenBuffer`, not `EndDrawing`, which would poll a second time and eat raylib's key-press edges.
+- Fullscreen on an adaptive-refresh screen (ProMotion) runs on a fixed deadline grid instead: the panel refreshes when a frame lands, so the display link reports our own presents back. The frame wakes just early enough for its recent peak work, draws, sleeps to the deadline with `mach_wait_until` on a time-constrained thread, then swaps. Before macOS 14 the grid is the clock everywhere.
+
+## Linux
+
+GLFW uses its Wayland backend when `WAYLAND_DISPLAY` is set, and X11 otherwise; under X11 the loop is raylib's own, with vsync.
+
+On Wayland the clock is the surface's frame callback ([ui/wayland_linux.odin](ui/wayland_linux.odin)), not EGL's vsync, which NVIDIA's `egl-wayland2` runs at half the refresh. `end_draw` requests a callback before the swap so the swap's commit carries it, and `frame` waits for it on its own event queue, giving up after 100 ms (a hidden window gets none). A `target_fps` below the refresh adds a deadline grid on top.
+
+Fullscreen calls `glfwSetWindowMonitor` directly. raylib's `ToggleFullscreen` drops HiDPI there (Wayland cursor positions stay logical, so clicks landed at 0.8x of where they pointed at scale 1.25), and turns swap interval 1 back on, stacking the driver's wait on the callback's. Wayland gives no window position, so fullscreen uses the primary output.
+
+## Rendering
+
+Everything the UI draws goes through two small pipelines in one stream, one instanced quad per thing ([ui/shapes.odin](ui/shapes.odin)):
+
+- **Shapes** are signed distance fields: the fragment shader works out how far each pixel is from the edge of a rounded box (each corner its own radius), a triangle or a line, and fades the coverage over one physical pixel. Edges are smooth at any zoom without multisampling. A border is the box minus the box inside its widths, so it follows the fill's curve with any width per side. Clay's boxes snap to the physical pixel grid, so straight edges are crisp; shapes a host draws don't, so they move smoothly.
+- **Glyphs and images** are textured quads that only sample and tint.
+
+A frame's quads go to the GPU in one upload per pipeline, with a new draw call only where the pipeline, the clip or the texture changes. Clay's overlays (fades) and clips are the stream's state, so everything inside a fading or clipped element follows.
+
+Hosts draw with `ui.draw_circle`, `draw_ring`, `draw_line`, `draw_triangle` and `draw_gradient_pill`, in layout units. raylib's own `rl.*` drawing still works but is a separate batch: call `ui.flush_shapes()` before an `rl.*` call that must land on top of `ui.draw_*` output. A Custom element ([ui/component.odin](ui/component.odin)) draws whatever a host's `ui.Custom_Draw` proc draws, in its box and Clay's order, with the shapes before it already drawn.
+
+Text is drawn from a glyph cache ([ui/glyphs.odin](ui/glyphs.odin)): stb_truetype rasterizes each glyph the first time it's drawn, at its pixel size (`fontSize * display scale * zoom`), into 1024² atlas pages, drawn without mipmaps on the pixel grid. A character the font lacks comes from a fallback font sized to the same em: ones added with `ui.add_fallback_font`, then system fonts (STIX, Apple Symbols, Arial Unicode and Hiragino on macOS; DejaVu and Noto on Linux). There is no shaping (ligatures, Arabic) and no color emoji.
 
 ## Idle
 
-With `Window_Desc.idle_after` (seconds), `ui.frame` stops returning while nothing on screen would change, so the app neither lays out nor draws and the last frame stays up: the GPU rests. A frame is drawn on input (buttons, keys held or pressed, typed text, the wheel) or a size change; when the pointer moves onto another element or across a hover zone (`ui.hover_zone`, which rich text declares for its links), one frame per change, while moving within the same thing draws nothing; while a spring, a scroll's easing or a theme fade is moving; for `idle_after` seconds after the last of those (Clay's transitions finish in that time); when the app calls `ui.request_redraw()` (the next frame: text streaming in) or `ui.wake_at` / `ui.wake_in` (a later time: a text field asks for its caret's next blink, a pulse can run at 15 fps); and at least once a second. Drawing outside Clay follows the same rule: a still picture needs nothing, anything that moves on its own asks for its frames. Idle, the loop still wakes each display tick to look at input. `UI_IDLE_DEBUG=1` prints every two seconds how many ticks drew and why. An idle yapper with its composer focused draws about 2 frames a second.
-
-## Linux (Wayland)
-
-GLFW uses its Wayland backend when `WAYLAND_DISPLAY` is set, and X11 otherwise. Under X11 the loop is plain raylib with vsync.
-
-On Wayland the frame clock is the surface's frame callback, not EGL's vsync ([ui/wayland_linux.odin](ui/wayland_linux.odin)). Swap interval is 0. `end_draw` requests a callback before the swap so the swap's commit carries it. `frame` waits for the callback on its own event queue, then polls input. A hidden window gets no callbacks, so the wait gives up after 100 ms. A `target_fps` below the refresh adds a deadline grid on top.
-
-Fullscreen (F) on Wayland calls `glfwSetWindowMonitor` directly, not raylib's `ToggleFullscreen`, for two reasons:
-
-- raylib's fullscreen mode drops HiDPI. It sets the screen size to the physical framebuffer and the mouse scale to 1, but Wayland cursor positions stay logical. At scale 1.25 every click landed at 0.8x of where it pointed. raylib's Wayland correction is behind `#if defined(_GLFW_WAYLAND) && !defined(_GLFW_X11)`, so it is compiled out of an X11 + Wayland build. Leaving raylib's fullscreen flag off keeps it on the windowed HiDPI path, the same as Hyprland's own fullscreen (SUPER+F).
-- `ToggleFullscreen` turns swap interval 1 back on while raylib's `VSYNC_HINT` flag is set. That stacked the driver's wait on the callback wait, and fullscreen swung between 30 and 50+ fps. The Wayland path also clears that flag at startup.
-
-Wayland gives no window position, so F fullscreens on the primary output.
-
-EGL's vsync is not used because NVIDIA's `egl-wayland2` runs swap interval 1 at half the refresh on Hyprland. The same loop with the older `egl-wayland`, or under XWayland, holds the full rate. `tools/vsync_probe` measures it:
-
-```
-odin run tools/vsync_probe
-```
-
-| Setup | vsync probe |
-| --- | --- |
-| native Wayland, `egl-wayland2` (default) | 30.3 fps |
-| native Wayland, `egl-wayland` (`__EGL_EXTERNAL_PLATFORM_CONFIG_FILENAMES=/usr/share/egl/egl_external_platform.d/10_nvidia_wayland.json`) | 60.6 fps |
-| XWayland (`env -u WAYLAND_DISPLAY`) | 60.7 fps |
-| the app, frame-callback clock | 60 fps, 16.67 ms frames |
-
-Measured 2026-09-26 on a 60 Hz 3840x2160 output at scale 1.25 with:
-
-- `egl-wayland2` 1.0.2-1 (`libnvidia-egl-wayland2.so.1`, `09_nvidia_wayland2.json`, picked first)
-- `egl-wayland` 1.1.22-1
-- `nvidia-open-dkms` / `nvidia-utils` 610.57.04-1, RTX 4090
-- Hyprland 0.56.2 (`efb5099`), `wayland` 1.26.0, `libglvnd` 1.7.0, `mesa` 26.2.2
-- kernel 7.2.5-3-omarchy (Arch)
-
-Once the probe shows the full refresh with the default stack, EGL vsync would work again. The frame-callback clock is still the Wayland-native clock and gives input one frame less latency, so there is no need to switch back.
-
-Text is drawn from a glyph cache ([ui/glyphs.odin](ui/glyphs.odin)). Fonts are read with stb_truetype, and each glyph is rasterized the first time it is drawn, at `fontSize * dpi` pixels, into 1024² atlas pages. It is drawn with bilinear filtering and no mipmaps, snapped to the physical pixel grid; trilinear filtering is what softens raylib text. A character the font lacks comes from a fallback font, sized to the same em: ones added with `ui.add_fallback_font`, then system fonts (STIX for math, Greek and arrows, Apple Symbols, Arial Unicode, Hiragino for CJK on macOS; DejaVu and Noto on Linux). `ui.draw_glyph` draws by glyph id, for layouts that place glyphs themselves. There is no shaping: ligatures, Arabic and other scripts that need it draw character by character. Color emoji fonts aren't supported.
-
-Everything the UI draws goes through two small pipelines in one stream, one quad per thing ([ui/shapes.odin](ui/shapes.odin)):
-
-- **Shapes** are signed distance fields. The fragment shader works out how far each pixel is from the edge of a rounded box (each corner its own radius), a triangle, or a line, and fades the coverage over one physical pixel. Edges are smooth at any zoom without multisampling, and a large radius is as round as a small one.
-- **Borders** are the box minus the box inside its widths, so they follow the fill's curve exactly, with any width per side.
-- **Clay's rectangles and borders** snap to the physical pixel grid, so straight edges are crisp. Shapes a host draws do not snap, so they can move smoothly.
-- **Glyphs and images** are textured quads of 36 bytes each, with a shader that only samples and tints. They are most of the quads, and the shapes' shader never sees them.
-
-A frame's quads go to the GPU in one upload per pipeline, with a new draw call only where the pipeline, the clip or the texture changes. Interleaving with raylib's batch instead cost a buffer upload at every switch between text and shapes, and macOS's GL stalls on each one.
-
-Against the triangle-fan renderer this replaced (raylib's batch, with 4× multisampling for smooth edges), over the same `--bench` session at 120 fps on an M5:
-
-| | Draw (CPU) avg / p99 | GPU avg / p99 |
-| --- | --- | --- |
-| triangle fans, MSAA 4× | 1.02 / 2.51 ms | 2.15 / 3.10 ms |
-| shapes and glyphs | 0.64 / 1.21 ms | 2.05 / 4.08 ms |
-
-Hosts draw with `ui.draw_circle`, `draw_ring`, `draw_line`, `draw_triangle` and `draw_gradient_pill`, in layout units. raylib's own `rl.*` drawing still works but is a separate batch: call `ui.flush_shapes()` before an `rl.*` call that must land on top of `ui.draw_*` output. A Custom element's draw proc gets a flush before it runs.
-
-The renderer applies a clip only when something draws, and only when it differs from the one in effect. Every clipped floating element (a slider knob, a segment label) arrives as its own Clay root with its own scissor start and end, almost always with the same box.
-
-## Themes
-
-`ui.theme` is a `Palette` (colors), `Metrics` (shape and spacing), `Typography` (text sizes per role) and `Motion`. Widgets read their colors through `styles`, derived from it. Change colors with `ui.set_palette(p, fade)`, which can cross-fade.
-
-A palette usually comes from a `Theme_Base`: mode, background, foreground, accent, and optionally surface, border, text on the accent, and status colors. `ui.palette_from_base` mixes the rest from those, with contrast floors so low-contrast themes stay readable (dim text at least 3.5:1, text on the accent 4.5:1 where black or white can reach it, unless the base sets it). Hover lifts a control toward the text color. Built in: `BASE_DARK` and `BASE_LIGHT`.
-
-`ui/omarchy` follows the active [Omarchy](https://omarchy.org) theme. It reads `~/.local/state/omarchy/current/theme/colors.toml` and notices `omarchy theme set` by polling `theme.name` twice a second. It is a separate package: the lib core never imports it, and outside Linux it compiles to a no-op. All of Omarchy's bundled themes map cleanly.
-
-`ui/appearance` is the macOS counterpart. It reads AppKit's system colors under the app's effective appearance: window background, label text, separator, the accent picked in System Settings, and AppKit's white for text on the accent (4.0:1 on the default blue, which the 4.5:1 floor would otherwise turn black). Light/Dark and accent changes are noticed by re-reading the colors every 250 ms, since nothing in the loop receives the notification. `appearance.match_window` pins the title bar to a built-in palette's mode, or back to the system's with nil. Outside macOS it compiles to a no-op.
-
-The demo app follows Omarchy when it is installed, the macOS appearance on a Mac, and the design's dark colors otherwise. The Showcase's Theme card switches between the system theme and the design's dark and light colors, and `--theme=omarchy|system|dark|light` picks one at startup.
+With `Window_Desc.idle_after` (seconds), `ui.frame` stops returning while nothing on screen would change, so the app neither lays out nor draws and the GPU rests ([ui/idle.odin](ui/idle.odin)). A frame is drawn on input or a size change; when the pointer moves onto another element or across a hover zone (`ui.hover_zone`); while a spring, a scroll's easing or a theme fade moves; for `idle_after` seconds after the last of those (Clay's transitions finish in that time); when the app calls `ui.request_redraw()` (text streaming in) or `ui.wake_at` / `ui.wake_in` (a caret's next blink); and at least once a second. `UI_IDLE_DEBUG=1` prints every two seconds how many ticks drew and why.
 
 ## Frame timing
 
-The frame loop times itself, with nothing for the app to add ([ui/perf.odin](ui/perf.odin)), against a budget of 120 fps on any display (`ui.PERF_BUDGET_MS`): the CPU and the GPU each get 8.33 ms, since they work side by side. A 60 Hz screen would hide a frame that misses on a 120 Hz one.
+The frame loop times itself, with nothing for the app to add ([ui/perf.odin](ui/perf.odin)), against a budget of 120 fps on any display (`ui.PERF_BUDGET_MS`): the CPU and the GPU each get 8.33 ms, since they work side by side.
 
 | Part | From, to |
 | --- | --- |
-| Tick | the frame wait's end to `begin_layout`: input and the app's own logic |
+| Tick | `frame` returning to `begin_layout`: the app's own logic |
 | Layout | `begin_layout` to `end_layout`: building the UI and Clay's layout |
 | Draw | `begin_draw` to the last draw call: host drawing, `render`, the upload |
-| CPU | the frame wait's end to the swap: all of the above |
-| GPU | the frame's draw calls, from `GL_TIME_ELAPSED` queries read three frames late, so reading never stalls |
-| Swap | `end_draw`'s present wait and swap, mostly waiting: shown, not budgeted |
+| CPU | `frame` returning to the last draw call: all of the above |
+| GPU | the frame's draw calls, from timer queries read three frames late, so reading never stalls |
+| Swap | `end_draw`'s present wait and swap: mostly waiting, not budgeted |
 | Frame | one frame to the next |
 
-`ui.debug_strip()` (F3) shows the last 120 frames' average and worst of each part, CPU and GPU in green, amber past half the budget, red over it. `ui.perf_stats()` returns the same numbers. A benchmark: `ui.perf_bench_start(warmup)`, a scripted session (`ui.perf_bench_frames()` says how far it is), then `ui.perf_report(title)`, which prints avg, p50, p99 and worst per part and returns false when CPU or GPU p99 is over budget.
+`ui.debug_strip()` (F3) shows the last 120 frames' average and worst of each part, CPU and GPU in green, amber past half the budget, red over it; `ui.perf_stats()` returns the same numbers. A benchmark: `ui.perf_bench_start(warmup)`, a scripted session (`ui.perf_bench_frames()` says how far it is), then `ui.perf_report(title)`, which prints avg, p50, p99 and worst per part and returns false when CPU or GPU p99 is over budget.
+
+## Themes
+
+`ui.theme` is a `Palette` (colors), `Metrics` (shape and spacing), `Typography` (text sizes per role) and `Motion` ([ui/theme.odin](ui/theme.odin)). Widgets read its tokens as they build, so a changed token shows next frame; `ui.set_palette(p, fade)` swaps all colors, cross-faded.
+
+A palette usually comes from a `Theme_Base`: mode, background, foreground, accent, and optionally surface, border, text on the accent, and status colors. `ui.palette_from_base` mixes the rest, with contrast floors so low-contrast themes stay readable (dim text at least 3.5:1, text on the accent 4.5:1 where black or white can reach it). Hover lifts a control toward the text color. Built in: `BASE_DARK` and `BASE_LIGHT`.
+
+Two optional packages follow the system's theme; the library core imports neither, and each compiles to a no-op on the other platform:
+
+- `ui/omarchy` follows the active [Omarchy](https://omarchy.org) theme on Linux: it reads `colors.toml` from Omarchy's current theme and notices `omarchy theme set` by polling twice a second.
+- `ui/appearance` follows macOS: AppKit's system colors under the app's appearance (window background, label text, separator, the accent from System Settings, AppKit's white for text on the accent), re-read every 250 ms. `appearance.match_window` pins the title bar to a mode, or back to the system's with nil.
+
+The demo follows Omarchy when it's installed, the macOS appearance on a Mac, and the design's dark colors otherwise; `--theme=omarchy|system|dark|light` picks at startup.
 
 ## Designs
 
-A design is the whole look and feel in one file: a font and size for each text role (title, heading, body, small, and mono for code), corner radii, padding, gaps and control sizes, motion, and colors for dark and light. Another project loads it:
+A design is the whole look and feel in one file ([ui/design.odin](ui/design.odin)): a font and size for each text role (title, heading, body, small, mono), corner radii, padding, gaps and control sizes, motion, and colors for dark and light. Another project loads it:
 
 ```odin
 ui.register_font("Inter-Medium", #load("fonts/Inter-Medium.ttf"))
@@ -129,65 +114,52 @@ ui.apply_design(d, .Dark)                 // nil keeps the current colors (syste
 
 The file is a small TOML subset ([designs/console.toml](designs/console.toml)):
 
-- `[type]`: `font_<role>` is a name given to `ui.register_font`, or a path to a .ttf/.otf relative to the design file. An empty or unknown font falls back to the first one registered. `size_<role>` is in points.
-- `[shape]`: `Metrics`.
-- `[motion]`: durations in seconds, bounce, and press depth.
-- `[dark]` and `[light]`: a `Theme_Base`. Background, foreground and accent are required; the rest is derived unless given.
-- `[dark.palette]` and `[light.palette]`: optional palette fields set by hand, applied after the derivation.
+- `[type]`: `font_<role>` is a name given to `ui.register_font`, or a path to a .ttf/.otf relative to the design file; an unknown font falls back to the first one registered. `size_<role>` is in points.
+- `[shape]`: `Metrics`. `[motion]`: durations in seconds, bounce, and press depth.
+- `[dark]` and `[light]`: a `Theme_Base`. Background, foreground and accent are required; the rest is derived unless given. `[dark.palette]` and `[light.palette]` set single palette fields after the derivation.
 
-Keys a file leaves out keep the built-in value, and unknown keys are reported and skipped. Struct tags on the token fields (`range`, `label`, `unit`) drive both the file format and the editor, so a token added to `Metrics`, `Typography` or `Motion` shows up in both without further code.
+Keys a file leaves out keep the built-in value; unknown keys are reported and skipped. Struct tags on the token fields (`range`, `label`, `unit`) drive both the file format and the Design tab, so a new token shows up in both without further code.
 
-The **Design** tab edits a design live next to the showcase. It covers:
-
-- colors, as base or single palette fields, with an HSB picker
-- a font and a size for each role
-- every shape and motion token
-
-It saves to `designs/` next to the binary, and reloads the file when it changes on disk, so a text editor works too. Included: `console` (the default), `soft` and `compact`, and three serif reading designs for the yapper chat app, `yapper-ink` (Newsreader, warm), `yapper-night` (EB Garamond, cool) and `yapper-graphite` (Spectral, neutral). `--design=NAME` starts with one. Fonts in `fonts/` show up in the font menus. A design that uses one refers to it by path, so ship the font with the design. Only Inter is committed; `./fetch-fonts.sh` downloads the others from Google Fonts (curl, plus `fonttools` to cut static instances), and a design whose font is missing falls back to Inter.
+The **Design** tab edits a design live next to the showcase: colors (base or single palette fields, with an HSB picker), a font and size for each role, and every shape and motion token. It saves to `designs/` and reloads a file changed on disk, so a text editor works too. Three designs show the range: `console` (the default: sharp, dark blue), `soft` (rounded, lavender, springy) and `compact` (dense, green, quick). Fonts dropped into `fonts/` show up in the font menus; a design refers to such a font by path, so ship it with the design.
 
 ### Motion
 
-Widgets animate through `ui.anim(id, target, duration, bounce)`, a spring per widget id and channel, kept in a table because immediate-mode widgets have nowhere else to keep state. A spring retargeted mid-flight turns around from where it is, instead of restarting like a timed tween, so sweeping the pointer over a row of buttons stays smooth. Values nobody asks for during a frame are dropped.
+Widgets animate through `ui.anim(id, target, duration, bounce)`, a spring per widget id and channel ([ui/anim.odin](ui/anim.odin)). A spring retargeted mid-flight turns around from where it is instead of restarting, so sweeping the pointer over a row of buttons stays smooth.
 
-- **Hover** eases each control toward its hover color. **Press** darkens it by the press depth. `ui.feedback` does both, for your own components too.
-- **Change** slides the segmented control's pill, the tab bar's underline, the switch's knob and the slider's knob, with the design's bounce on things that move. The dropdown's chevron turns over too.
+- **Hover** eases each control toward its hover color; **press** darkens it by the press depth. `ui.feedback` does both, for your own components too.
+- **Change** slides the segmented control's pill, the tab bar's underline, and the switch's and slider's knobs, with the design's bounce.
 - **Enter** fades and drops menus in, and cross-fades palettes.
-- **Scroll** smooths the wheel. Clay's scroll position becomes the target, and the container eases toward it.
+- **Scroll** smooths the wheel: Clay's scroll position becomes the target, and the container eases toward it.
 
-`Button_Opts.force` shows a hover or press state without the pointer, for specimens like the Showcase's buttons card.
+`Button_Opts.force` shows a hover or press state without the pointer, for specimens.
 
 ## Text fields
 
-`ui.text_edit(id, &state, opts)` is a text field, one line or many (`multiline`, wrapping and growing to `lines` before it scrolls). The host owns the `ui.Text_Edit` and reads it back with `ui.edit_text`; the result says whether the text changed, Enter submitted it, or Escape cancelled.
+`ui.text_edit(id, &state, opts)` is a text field, one line or many (`multiline`, growing to `lines` before it scrolls) ([ui/edit.odin](ui/edit.odin)). The host owns the `ui.Text_Edit` and reads it with `ui.edit_text`; the result says whether the text changed, Enter submitted it, or Escape cancelled.
 
-- **Keys** follow the platform: on macOS Option moves by word and Cmd by line, elsewhere Ctrl by word and Home/End by line. Cmd (Ctrl) with A, C, X, V and Z selects all, copies, cuts, pastes and undoes; Shift+Cmd+Z (Ctrl+Y) redoes. Undo takes back a word of typing at a time.
-- **The pointer** places the caret, drags a selection, double-clicks a word and triple-clicks a line, and shows the text cursor over a field.
-- **Focus**: one field has the keyboard. A click focuses or blurs; `ui.focus(id)` and `ui.blur()` do it from code, and `ui.editing()` tells the host to keep bare-key shortcuts out of the way while someone types.
-
-The field lays out its own lines with the same advances Clay measures (`ui.text_width`, `ui.rune_width`), so the caret and selection land on the glyphs. Typed text arrives in `ui.input.chars` (`ui.typed()`), as the keyboard layout produced it, and editing keys repeat while held (`ui.key_repeat`).
+- **Keys** follow the platform: on macOS Option moves by word and Cmd by line, elsewhere Ctrl by word and Home/End by line. Cmd (Ctrl) with A, C, X, V and Z selects all, copies, cuts, pastes and undoes; Shift+Cmd+Z (Ctrl+Y) redoes, a word of typing at a time.
+- **The pointer** places the caret, drags a selection, double-clicks a word and triple-clicks a line.
+- **Focus**: one field has the keyboard. `ui.focus(id)` and `ui.blur()` set it from code, and `ui.editing()` tells the host to keep bare-key shortcuts out of the way while someone types.
 
 ## Rich text
 
-`ui.rich_text(id, spans, opts)` is a paragraph of spans in different styles, wrapped together as one text: each `ui.Span` has its text and a `Span_Style` (font slot, size, color, a rounded box behind it, underline, strikethrough, and a link id). Clay wraps each text element on its own, so the paragraph lays out its own lines at the width its element had last frame (`opts.width` before it has one, else the last paragraph's), and draws them as one Custom element. Baselines line up across fonts on a line, a span with a box (inline code) takes a few points of room on either side, a word too wide for the line breaks between characters, and spaces where a line breaks hang. `opts.align` centers or right-aligns the lines; `opts.nowrap` breaks only at newlines and makes the element as wide as its widest line (code: clip the parent to cut what overflows, and `ui.rich_content_width` says how wide it got). The result has the height, and the link under the pointer and the one clicked this frame, with the hand cursor over links.
+`ui.rich_text(id, spans, opts)` is a paragraph of spans in different styles, wrapped together as one text ([ui/rich.odin](ui/rich.odin)): each `ui.Span` has its text and a `Span_Style` (font slot, size, color, a rounded box behind it, underline, strikethrough, a link id). Baselines line up across fonts, a span with a box (inline code) takes room on either side, and a word too wide for the line breaks between characters. `opts.align` centers or right-aligns; `opts.nowrap` breaks only at newlines. The result has the height, and the link under the pointer and the one clicked.
 
-Paragraphs are selectable together: a drag selects from one paragraph to another in the order they were declared (it follows the pointer's height, however far left or right it goes), a double click takes a word, a triple click a paragraph, Shift+click extends, a click elsewhere clears it. Cmd+C (Ctrl+C) copies the text, paragraphs joined by newlines, unless a text field has the keyboard; `ui.rich_selection()` gives it to the host, `opts.unselectable` leaves decoration (list markers) out. Layouts are kept per id while the text, fonts, sizes and width stay the same; colors and decorations can change every frame without a relayout. Italic and bold are font slots of their own: `fetch-fonts.sh` cuts Newsreader Italic, SemiBold and SemiBold Italic for this.
+Paragraphs are selectable together: a drag selects across paragraphs in the order they were declared, a double click takes a word, a triple click a paragraph, Shift+click extends. Cmd+C (Ctrl+C) copies, paragraphs joined by newlines; `ui.rich_selection()` gives the text to the host, and `opts.unselectable` leaves decoration (list markers) out. A layout is kept per id while the text, fonts, sizes and width stay the same. Italic and bold are font slots of their own.
 
 ## Layout
 
 ```
-ui/            Clay widgets, the frame loop, the raylib renderer, themes, designs, animation, macOS and Wayland hooks
+ui/            widgets, the frame loop, the renderer, text, themes, designs, animation, macOS and Wayland hooks
 ui/omarchy/    optional: follow the active Omarchy theme (Linux)
 ui/appearance/ optional: follow the system appearance and accent (macOS)
-app/           the demo: graph, showcase, design editor
-designs/       design files: console (default), soft, compact
-deps/clay/     Clay bindings + built static libs
-deps/raylib/   raylib bindings + the Linux and macOS static libs and their build scripts
-tools/         vsync_probe
-fonts/         Inter (committed); ./fetch-fonts.sh adds the rest
+app/           the demo: graph, showcase, design editor, --bench
+designs/       console (the default), soft, compact
+deps/clay/     Clay bindings + static libs, and their build script
+deps/raylib/   raylib bindings + static libs, and their build script
+fonts/         Inter and JetBrains Mono; other fonts dropped in stay local
 ```
-
-The app owns the loop (`ui.init`, `for ui.frame()`, `ui.shutdown`). Widgets read an input snapshot and emit Clay. They do not call raylib. The graph does, in the canvas region, before `ui.render` paints the panel on top.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Bundled third-party pieces keep their own licenses: Clay is zlib ([deps/clay/LICENSE.md](deps/clay/LICENSE.md)), and the fonts are SIL OFL 1.1, each with its license next to it in [fonts/](fonts): [Inter](https://github.com/rsms/inter), [EB Garamond](https://github.com/octaviopardo/EBGaramond12), [Cormorant Garamond](https://github.com/CatharsisFonts/Cormorant), [Spectral](https://github.com/productiontype/Spectral), [Newsreader](https://github.com/productiontype/Newsreader) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono). All but Inter are fetched by `./fetch-fonts.sh`, not committed. The Cormorant, EB Garamond, Newsreader and JetBrains Mono files are static instances (Regular, Medium, SemiBold) it cuts from the variable fonts on [Google Fonts](https://github.com/google/fonts) with `fonttools varLib.instancer`, because only a variable font's default instance is drawn (Cormorant's is Light). raylib is zlib ([deps/raylib/LICENSE.md](deps/raylib/LICENSE.md)).
+MIT, see [LICENSE](LICENSE). Bundled third-party pieces keep their own licenses: Clay and raylib are zlib ([deps/clay/LICENSE.md](deps/clay/LICENSE.md), [deps/raylib/LICENSE.md](deps/raylib/LICENSE.md)), and [Inter](https://github.com/rsms/inter) and [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) are SIL OFL 1.1, with their licenses in [fonts/](fonts). The JetBrains Mono file is the Regular instance of its variable font, cut with `fonttools varLib.instancer`, since only a variable font's default instance is drawn.
