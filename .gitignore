@@ -4,8 +4,11 @@ graph-shot.png
 *.dSYM/
 .DS_Store
 *.log
-# Fonts come from ./fetch-fonts.sh; only Inter, which the demo embeds, is committed.
+# Inter (the default) and JetBrains Mono (the designs' code font) are committed; other fonts
+# dropped into fonts/ show up in the Design tab's menus but stay local.
 fonts/*
 !fonts/Inter-Medium.ttf
 !fonts/Inter-LICENSE.txt
+!fonts/JetBrainsMono-Regular.ttf
+!fonts/JetBrainsMono-LICENSE.txt
 /*.o

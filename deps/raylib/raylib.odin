@@ -96,27 +96,12 @@ MAX_MATERIAL_MAPS      :: #config(RAYLIB_MAX_MATERIAL_MAPS, 12)
 
 #assert(size_of(rune) == size_of(c.int))
 
-// Linux links our own build (build_linux.sh): GLFW with both the X11 and
-// Wayland backends, picked at runtime. Wayland libraries are dlopened, so only
-// X11 is linked. There is no fallback: ui/wayland_linux.odin needs GLFW's
-// Wayland symbols, which the compiler's X11-only lib lacks.
-// macOS links ours (build_macos.sh), falling back to the compiler's if
-// macos/libraylib.a is missing. Windows links the compiler's.
-VENDOR_RAYLIB :: "vendor:raylib/"
-MACOS_LIB :: "macos/libraylib.a" when #exists("macos/libraylib.a") else VENDOR_RAYLIB + "macos/libraylib.a"
-
-when ODIN_OS == .Windows {
-	@(extra_linker_flags="/NODEFAULTLIB:libcmt")
+// Our own builds (build.sh), for the two platforms ui/ runs on. Linux: GLFW
+// with both its X11 and Wayland backends, picked at runtime; the Wayland
+// libraries are dlopened, so only X11 is linked. macOS: universal.
+when ODIN_OS == .Linux {
 	foreign import lib {
-		VENDOR_RAYLIB + "windows/raylib.lib",
-		"system:Winmm.lib",
-		"system:Gdi32.lib",
-		"system:User32.lib",
-		"system:Shell32.lib",
-	}
-} else when ODIN_OS == .Linux {
-	foreign import lib {
-		"linux-arm64/libraylib.a" when ODIN_ARCH == .arm64 else "linux/libraylib.a",
+		"linux/libraylib.a",
 		"system:dl",
 		"system:pthread",
 		"system:m",
@@ -124,14 +109,12 @@ when ODIN_OS == .Windows {
 	}
 } else when ODIN_OS == .Darwin {
 	foreign import lib {
-		MACOS_LIB,
+		"macos/libraylib.a",
 		"system:Cocoa.framework",
 		"system:OpenGL.framework",
 		"system:IOKit.framework",
 		"system:QuartzCore.framework", // GLFW 3.4+ (raylib after 6.0) makes a CAMetalLayer
 	}
-} else {
-	foreign import lib "system:raylib"
 }
 
 VERSION_MAJOR :: 6

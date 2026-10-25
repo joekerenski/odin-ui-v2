@@ -7,14 +7,10 @@
 # reapply the local addition at its end (exported OpenElementWithId and
 # CloseElement).
 #
-# Needs clang, ar and git. Two targets need LLVM's tools, which Apple's
-# don't cover, and are left as they are without them:
-#   wasm/clay.o    Apple's clang has no WebAssembly backend: set CLANG to an
-#                  LLVM clang (Homebrew: /opt/homebrew/opt/llvm/bin/clang).
-#   linux/clay.a   GNU ld wants a GNU-format archive with its own symbol
-#                  index; macOS's ar writes a BSD one. Set LLVM_AR to llvm-ar.
-# The committed wasm/clay.o and linux/clay.a are Clay's own builds of this
-# commit, byte for byte.
+# Needs clang, ar and git. linux/clay.a also needs llvm-ar (LLVM_AR): GNU ld
+# wants a GNU-format archive with its own symbol index, and macOS's ar writes
+# a BSD one. Without it the committed linux/clay.a, Clay's own build of this
+# commit byte for byte, is left as it is.
 set -eu
 cd "$(dirname "$0")"
 
@@ -44,13 +40,6 @@ if [ -n "$LLVM_AR" ]; then
 else
 	echo "no llvm-ar: linux/clay.a left as it is"
 fi
-# Windows links the object as a .lib, as upstream builds it.
-"$CLANG" -c -DCLAY_IMPLEMENTATION -ffreestanding -O3 -target x86_64-pc-windows-msvc "$SRC/clay.c" -o windows/clay.lib
-if "$CLANG" -c -target wasm32 -x c /dev/null -o /dev/null 2>/dev/null; then
-	"$CLANG" -c -DCLAY_IMPLEMENTATION -nostdlib -O3 -target wasm32 "$SRC/clay.c" -o wasm/clay.o
-else
-	echo "no wasm32 target in $CLANG: wasm/clay.o left as it is"
-fi
 
 echo "Clay $COMMIT, $("$CLANG" --version | head -1)"
-shasum -a 256 macos/clay.a macos-arm64/clay.a linux/clay.a windows/clay.lib wasm/clay.o
+shasum -a 256 macos/clay.a macos-arm64/clay.a linux/clay.a

@@ -110,24 +110,12 @@ package rlgl
 import "core:c"
 import rl "../."
 
-VERSION :: "6.0"
+VERSION :: "6.5-dev"
 
-// Same libs as ../raylib.odin, which explains the choice.
-VENDOR_RAYLIB :: "vendor:raylib/"
-MACOS_LIB :: "../macos/libraylib.a" when #exists("../macos/libraylib.a") else VENDOR_RAYLIB + "macos/libraylib.a"
-
-when ODIN_OS == .Windows {
-	@(extra_linker_flags="/NODEFAULTLIB:libcmt")
+// The same libraries as ../raylib.odin.
+when ODIN_OS == .Linux {
 	foreign import lib {
-		VENDOR_RAYLIB + "windows/raylib.lib",
-		"system:Winmm.lib",
-		"system:Gdi32.lib",
-		"system:User32.lib",
-		"system:Shell32.lib",
-	}
-} else when ODIN_OS == .Linux {
-	foreign import lib {
-		"../linux-arm64/libraylib.a" when ODIN_ARCH == .arm64 else "../linux/libraylib.a",
+		"../linux/libraylib.a",
 		"system:dl",
 		"system:pthread",
 		"system:m",
@@ -135,14 +123,12 @@ when ODIN_OS == .Windows {
 	}
 } else when ODIN_OS == .Darwin {
 	foreign import lib {
-		MACOS_LIB,
+		"../macos/libraylib.a",
 		"system:Cocoa.framework",
 		"system:OpenGL.framework",
 		"system:IOKit.framework",
 		"system:QuartzCore.framework", // GLFW 3.4+ (raylib after 6.0) makes a CAMetalLayer
 	}
-} else {
-	foreign import lib "system:raylib"
 }
 
 GRAPHICS_API_OPENGL_11  :: false
