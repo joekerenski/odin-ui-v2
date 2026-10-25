@@ -6,11 +6,10 @@ import "core:math"
 // Design tokens. `theme` is a Palette (colors), Metrics (shape and spacing),
 // Typography (text sizes and the font slot of each role), and Motion. Fields
 // read through `using`, so `theme.bg`, `theme.pad_md` and `theme.size_body`
-// all work; motion is `theme.motion.hover`. Widgets read `styles`, which
-// reset_styles() derives from `theme`.
+// all work; motion is `theme.motion.hover`. Widgets read `theme` directly.
 //
-// Change colors with set_palette (optionally cross-faded), not by poking
-// fields, so `styles` follows. A palette usually comes from a Theme_Base, a
+// Widgets read tokens as they build, so a changed token shows next frame;
+// set_palette swaps all colors, cross-faded. A palette usually comes from a Theme_Base, a
 // few colors any theme source can provide (a preset, Omarchy's colors.toml,
 // a system appearance), with the rest mixed from them by palette_from_base.
 // A whole look, colors for both modes included, is a Design (design.odin).
@@ -232,12 +231,11 @@ palette_from_base :: proc(b: Theme_Base) -> Palette {
 }
 
 // Swap the palette; metrics stay. `fade` seconds cross-fades from the current
-// colors (0 = at once). `styles` follows every frame of the fade.
+// colors (0 = at once). Widgets follow every frame of the fade.
 set_palette :: proc(p: Palette, fade: f32 = 0) {
 	if fade <= 0 {
 		s_fade = {}
 		theme.palette = p
-		reset_styles()
 		return
 	}
 	s_fade = {from = theme.palette, to = p, t = 0, duration = fade, active = true}
@@ -270,7 +268,6 @@ theme_tick :: proc(dt: f32) {
 		out[i] = from[i] + (to[i] - from[i]) * k
 	}
 	theme.palette = transmute(Palette)out
-	reset_styles()
 	if s_fade.t >= 1 {
 		s_fade.active = false
 	}
@@ -351,252 +348,4 @@ hsv_to_rgb :: proc(h, s, v: f32, alpha: f32 = 255) -> Color {
 		r, g, b = c, 0, x
 	}
 	return {(r + m) * 255, (g + m) * 255, (b + m) * 255, alpha}
-}
-
-// --- resolved per-widget styles ----------------------------------------------
-//
-// Widgets read `styles.<widget>.<field>` for chrome. `reset_styles()` re-derives
-// every field from the current `theme` tokens.
-
-Button_Style :: struct {
-	bg:             Color,
-	bg_hover:       Color,
-	text:           Color,
-	accent_bg:      Color,
-	accent_hover:   Color,
-	text_on_accent: Color,
-	radius:         f32,
-	height:         f32,
-}
-
-Toggle_Style :: struct {
-	bg:       Color,
-	bg_hover: Color,
-	text:     Color,
-	on_bg:    Color,
-	on_hover: Color,
-	on_text:  Color,
-	knob:     Color, // the switch's knob
-	radius:   f32,
-	height:   f32,
-}
-
-Slider_Style :: struct {
-	track:      Color,
-	fill:       Color, // the track up to the knob
-	label:      Color,
-	value:      Color,
-	knob:       Color,
-	knob_inner: Color,
-	height:     f32,
-	knob_r:     f32,
-}
-
-Panel_Style :: struct {
-	bg:      Color,
-	padding: u16,
-	gap:     u16,
-}
-
-Dropdown_Style :: struct {
-	bg:            Color,
-	bg_hover:      Color,
-	text:          Color,
-	selected_bg:   Color,
-	selected_text: Color,
-	menu_bg:       Color,
-	menu_border:   Color,
-	radius:        f32,
-	height:        f32,
-}
-
-Icon_Style :: struct {
-	bg:       Color,
-	bg_hover: Color,
-	glyph:    Color,
-	radius:   f32,
-	size:     f32,
-}
-
-Top_Bar_Style :: struct {
-	bg:      Color,
-	border:  Color,
-	height:  f32,
-	padding: u16,
-	gap:     u16,
-}
-
-Tab_Bar_Style :: struct {
-	text:            Color,
-	text_hover:      Color,
-	text_on:         Color,
-	underline:       Color,
-	underline_hover: Color,
-	underline_h:     f32,
-	pad_x:           u16,
-	gap:             u16,
-}
-
-Card_Style :: struct {
-	bg:      Color,
-	border:  Color,
-	title:   Color,
-	radius:  f32,
-	padding: u16,
-	gap:     u16,
-	max_w:   f32,
-}
-
-Scroll_Style :: struct {
-	thumb:     Color,
-	thumb_hot: Color,
-	width:     f32,
-	inset:     f32, // gap between thumb and the container edge
-	min_thumb: f32,
-	padding:   u16,
-	gap:       u16,
-}
-
-Field_Style :: struct {
-	bg:           Color,
-	bg_hover:     Color,
-	border:       Color,
-	border_focus: Color,
-	text:         Color,
-	placeholder:  Color,
-	caret:        Color,
-	selection:    Color, // behind selected text; text keeps its color
-	radius:       f32,
-	pad_x:        u16,
-	pad_y:        u16,
-	line:         f32, // line height over the font's draw size
-}
-
-Widget_Styles :: struct {
-	button:   Button_Style,
-	toggle:   Toggle_Style,
-	slider:   Slider_Style,
-	panel:    Panel_Style,
-	dropdown: Dropdown_Style,
-	icon:     Icon_Style,
-	top_bar:  Top_Bar_Style,
-	tab_bar:  Tab_Bar_Style,
-	card:     Card_Style,
-	scroll:   Scroll_Style,
-	field:    Field_Style,
-}
-
-styles: Widget_Styles
-
-styles_from_theme :: proc(t: Theme) -> Widget_Styles {
-	return Widget_Styles{
-		button = {
-			bg             = t.surface,
-			bg_hover       = t.surface_hot,
-			text           = t.text,
-			accent_bg      = t.accent,
-			accent_hover   = t.accent_hot,
-			text_on_accent = t.text_on_accent,
-			radius         = t.radius_sm,
-			height         = t.row_h,
-		},
-		toggle = {
-			bg       = t.surface,
-			bg_hover = t.surface_hot,
-			text     = t.text,
-			on_bg    = t.accent,
-			on_hover = t.accent_hot,
-			on_text  = t.text_on_accent,
-			knob     = t.text,
-			radius   = t.radius_sm,
-			height   = t.row_h,
-		},
-		slider = {
-			track      = t.surface,
-			fill       = t.accent,
-			label      = t.text,
-			value      = t.accent,
-			knob       = t.accent,
-			knob_inner = t.bg,
-			height     = t.slider_h,
-			knob_r     = max(6, t.slider_h),
-		},
-		panel = {
-			bg      = t.panel,
-			padding = u16(t.pad_md + 2),
-			gap     = t.gap_md,
-		},
-		dropdown = {
-			bg            = t.surface,
-			bg_hover      = t.surface_hot,
-			text          = t.text,
-			selected_bg   = t.accent,
-			selected_text = t.text_on_accent,
-			menu_bg       = t.panel,
-			menu_border   = t.border,
-			radius        = t.radius_sm,
-			height        = t.row_h,
-		},
-		icon = {
-			bg       = t.surface,
-			bg_hover = t.surface_hot,
-			glyph    = t.text,
-			radius   = t.radius_sm,
-			size     = 26,
-		},
-		top_bar = {
-			bg      = t.panel,
-			border  = t.border,
-			height  = t.bar_h,
-			padding = u16(t.pad_md + 2),
-			gap     = u16(t.gap_md * 2),
-		},
-		tab_bar = {
-			text            = t.text_dim,
-			text_hover      = t.text,
-			text_on         = t.text,
-			underline       = t.accent,
-			underline_hover = t.border,
-			underline_h     = 2,
-			pad_x           = t.pad_md,
-			gap             = 2,
-		},
-		card = {
-			bg      = t.panel,
-			border  = t.border,
-			title   = t.text,
-			radius  = t.radius_md,
-			padding = u16(t.pad_md + 4),
-			gap     = t.gap_md,
-			max_w   = t.content_w,
-		},
-		scroll = {
-			thumb     = t.surface,
-			thumb_hot = t.text_dim,
-			width     = 6,
-			inset     = 3,
-			min_thumb = 24,
-			padding   = u16(t.pad_md * 2),
-			gap       = u16(t.gap_md * 2),
-		},
-		field = {
-			bg           = t.surface,
-			bg_hover     = t.surface_hot,
-			border       = t.border,
-			border_focus = t.accent,
-			text         = t.text,
-			placeholder  = t.text_dim,
-			caret        = t.accent,
-			selection    = {t.accent.r, t.accent.g, t.accent.b, 90},
-			radius       = t.radius_sm,
-			pad_x        = u16(max(6, int(t.pad_md) - 2)),
-			pad_y        = 4,
-			line         = 1.45,
-		},
-	}
-}
-
-// Re-derive `styles` from the current `theme` tokens.
-reset_styles :: proc() {
-	styles = styles_from_theme(theme)
 }

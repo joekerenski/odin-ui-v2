@@ -9,6 +9,23 @@ import "core:time"
 import "core:unicode"
 import "core:unicode/utf8"
 
+
+// The text field's sizes the design tokens don't cover.
+@(private) FIELD_PAD_Y :: u16(4)
+// Line height, a multiple of the font size: fields and rich text.
+FIELD_LINE :: f32(1.45)
+
+@(private)
+field_pad_x :: proc() -> u16 {
+	return u16(max(6, int(theme.pad_md) - 2))
+}
+
+// Selected text's background, in fields and rich text.
+@(private)
+selection_color :: proc() -> Color {
+	return {theme.accent.r, theme.accent.g, theme.accent.b, 90}
+}
+
 // Text fields: one line, or many that wrap and grow to a few lines before
 // they scroll. The host owns the state and reads the text back:
 //
@@ -172,14 +189,13 @@ edit_destroy :: proc(e: ^Text_Edit) {
 // --- the widget ------------------------------------------------------------------------
 
 text_edit :: proc(id: string, e: ^Text_Edit, opts: Edit_Opts = {}) -> (res: Edit_Result) {
-	st := styles.field
 	ed := Editor {
 		e         = e,
 		font      = opts.font.? or_else theme.font_body,
 		size      = opts.size if opts.size != 0 else theme.size_body,
 		multiline = opts.multiline,
 	}
-	ed.line_h = math.round(text_draw_size(ed.font, ed.size) * st.line)
+	ed.line_h = math.round(text_draw_size(ed.font, ed.size) * FIELD_LINE)
 	max_lines := opts.multiline ? (opts.lines if opts.lines > 0 else 6) : 1
 	vp_id := fmt.tprintf("%s_vp", id)
 
@@ -253,14 +269,14 @@ text_edit :: proc(id: string, e: ^Text_Edit, opts: Edit_Opts = {}) -> (res: Edit
 	e.scroll.x = clamp(e.scroll.x, 0, max(0, content_w - view_w)) if !opts.multiline else 0
 
 	// Draw.
-	pad_x, pad_y: u16 = st.pad_x, st.pad_y
+	pad_x, pad_y: u16 = field_pad_x(), FIELD_PAD_Y
 	if opts.bare {
 		pad_x, pad_y = 0, 0
 	}
 	bg, border: Color
 	if !opts.bare {
-		bg = feedback(id, st.bg, st.bg_hover, hot && !has_focus, false)
-		border = st.border_focus if has_focus else st.border
+		bg = feedback(id, theme.surface, theme.surface_hot, hot && !has_focus, false)
+		border = theme.accent if has_focus else theme.border
 	}
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
@@ -268,7 +284,7 @@ text_edit :: proc(id: string, e: ^Text_Edit, opts: Edit_Opts = {}) -> (res: Edit
 			padding = {pad_x, pad_x, pad_y, pad_y},
 		},
 		backgroundColor = bg,
-		cornerRadius    = clay.CornerRadiusAll(st.radius),
+		cornerRadius    = clay.CornerRadiusAll(theme.radius_sm),
 		border          = {color = border, width = clay.BorderWidth{} if opts.bare else clay.BorderWidth{1, 1, 1, 1, 0}},
 	}) {
 		if clay.UI(clay.ID(vp_id))(clay.ElementDeclaration{
@@ -845,7 +861,6 @@ hard_line_at :: proc(s: string, i: int) -> (lo, hi: int) {
 
 @(private = "file")
 draw_line :: proc(ed: ^Editor, k: int, show_caret, has_focus: bool, placeholder: string) {
-	st := styles.field
 	e := ed.e
 	s := edit_text(e)
 	l := ed.lines[k]
@@ -859,21 +874,21 @@ draw_line :: proc(ed: ^Editor, k: int, show_caret, has_focus: bool, placeholder:
 		switch {
 		case len(s) == 0:
 			if show_caret {
-				caret_run(ed, placeholder, st.placeholder)
+				caret_run(ed, placeholder, theme.text_dim)
 			} else {
-				run(ed, placeholder, st.placeholder)
+				run(ed, placeholder, theme.text_dim)
 			}
 		case lo != hi && lo <= l.end && hi > l.start:
 			a, b := clamp(lo, l.start, l.end), clamp(hi, l.start, l.end)
-			run(ed, s[l.start:a], st.text)
+			run(ed, s[l.start:a], theme.text)
 			// A selected line break shows as a space's width of selection.
 			newline := l.end < len(s) && s[l.end] == '\n' && lo <= l.end && hi > l.end
 			if a < b || newline {
 				if clay.UI()(clay.ElementDeclaration{
 					layout          = {sizing = {width = clay.SizingFit({}), height = clay.SizingGrow({})}, childAlignment = {y = .Center}},
-					backgroundColor = st.selection,
+					backgroundColor = selection_color(),
 				}) {
-					run(ed, s[a:b], st.text)
+					run(ed, s[a:b], theme.text)
 					if newline {
 						if clay.UI()(clay.ElementDeclaration{
 							layout = {sizing = {width = clay.SizingFixed(rune_width(' ', ed.font, ed.size)), height = clay.SizingGrow({})}},
@@ -881,12 +896,12 @@ draw_line :: proc(ed: ^Editor, k: int, show_caret, has_focus: bool, placeholder:
 					}
 				}
 			}
-			run(ed, s[b:l.end], st.text)
+			run(ed, s[b:l.end], theme.text)
 		case show_caret && line_of(ed.lines[:], e.caret) == k:
-			run(ed, s[l.start:e.caret], st.text)
-			caret_run(ed, s[e.caret:l.end], st.text)
+			run(ed, s[l.start:e.caret], theme.text)
+			caret_run(ed, s[e.caret:l.end], theme.text)
 		case:
-			run(ed, s[l.start:l.end], st.text)
+			run(ed, s[l.start:l.end], theme.text)
 		}
 	}
 }
@@ -915,7 +930,7 @@ caret_run :: proc(ed: ^Editor, s: string, color: Color) {
 			sizing         = {width = clay.SizingFit({min = f32(w)}), height = clay.SizingFixed(h)},
 			childAlignment = {y = .Center},
 		},
-		border = {color = styles.field.caret, width = {left = w}},
+		border = {color = theme.accent, width = {left = w}},
 	}) {
 		run(ed, s, color)
 	}

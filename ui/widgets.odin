@@ -11,6 +11,24 @@ import "core:math"
 // Decorations (knobs, chevrons) are floating or Custom elements, so they draw
 // in Clay's order and clip with their container.
 
+// Sizes the design tokens don't cover.
+@(private) ICON_SIZE :: f32(26)
+@(private) TAB_UNDERLINE :: f32(2)
+@(private) TAB_GAP :: u16(2)
+@(private) SCROLL_WIDTH :: f32(6)
+@(private) SCROLL_INSET :: f32(3) // between the thumb and the container's edge
+@(private) SCROLL_MIN_THUMB :: f32(24)
+
+// The padding inside scroll_begin's area, around its content.
+scroll_padding :: proc() -> u16 {
+	return theme.pad_md * 2
+}
+
+@(private)
+knob_radius :: proc() -> f32 {
+	return max(6, theme.slider_h)
+}
+
 // --- layout chrome ----------------------------------------------------------
 
 divider :: proc(id: string) {
@@ -47,10 +65,10 @@ panel_begin :: proc(id: string = "Panel") -> bool {
 		layout = {
 			sizing          = {width = clay.SizingFixed(theme.panel_w), height = clay.SizingGrow({})},
 			layoutDirection = .TopToBottom,
-			padding         = clay.PaddingAll(styles.panel.padding),
-			childGap        = styles.panel.gap,
+			padding         = clay.PaddingAll(theme.pad_md + 2),
+			childGap        = theme.gap_md,
 		},
-		backgroundColor = styles.panel.bg,
+		backgroundColor = theme.panel,
 		clip            = {vertical = true, childOffset = clay.GetScrollOffset()},
 	})
 }
@@ -63,18 +81,17 @@ panel_end :: proc(id: string = "Panel") {
 // Full-width bar with a bottom border, children in a centered row. Put it
 // first in a root opened with direction = .TopToBottom.
 top_bar_begin :: proc(id: string = "TopBar") -> bool {
-	st := styles.top_bar
 	clay.OpenElementWithId(clay.ID(id))
 	return clay.ConfigureOpenElement(clay.ElementDeclaration{
 		layout = {
-			sizing          = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)},
+			sizing          = {width = clay.SizingGrow({}), height = clay.SizingFixed(theme.bar_h)},
 			layoutDirection = .LeftToRight,
-			padding         = clay.Padding{st.padding, st.padding, 0, 0},
-			childGap        = st.gap,
+			padding         = clay.Padding{theme.pad_md + 2, theme.pad_md + 2, 0, 0},
+			childGap        = theme.gap_md * 2,
 			childAlignment  = {y = .Center},
 		},
-		backgroundColor = st.bg,
-		border          = {color = st.border, width = clay.BorderWidth{bottom = 1}},
+		backgroundColor = theme.panel,
+		border          = {color = theme.border, width = clay.BorderWidth{bottom = 1}},
 	})
 }
 
@@ -121,22 +138,21 @@ box_begin :: proc(id: string, direction: clay.LayoutDirection, opts: Box_Opts) -
 }
 
 // Bordered surface with a title, children stacked. Width grows up to
-// `styles.card.max_w`; a parent that centers children centers the card.
+// `theme.content_w`; a parent that centers children centers the card.
 card_begin :: proc(id, title_text: string, subtitle: string = "") -> bool {
-	st := styles.card
 	clay.OpenElementWithId(clay.ID(id))
 	open := clay.ConfigureOpenElement(clay.ElementDeclaration{
 		layout = {
-			sizing          = {width = clay.SizingGrow({max = st.max_w}), height = clay.SizingFit({})},
+			sizing          = {width = clay.SizingGrow({max = theme.content_w}), height = clay.SizingFit({})},
 			layoutDirection = .TopToBottom,
-			padding         = clay.PaddingAll(st.padding),
-			childGap        = st.gap,
+			padding         = clay.PaddingAll(theme.pad_md + 4),
+			childGap        = theme.gap_md,
 		},
-		backgroundColor = st.bg,
-		border          = {color = st.border, width = clay.BorderWidth{1, 1, 1, 1, 0}},
-		cornerRadius    = clay.CornerRadiusAll(st.radius),
+		backgroundColor = theme.panel,
+		border          = {color = theme.border, width = clay.BorderWidth{1, 1, 1, 1, 0}},
+		cornerRadius    = clay.CornerRadiusAll(theme.radius_md),
 	})
-	text(title_text, theme.font_heading, theme.size_heading, st.title)
+	text(title_text, theme.font_heading, theme.size_heading, theme.text)
 	if subtitle != "" {
 		dim(subtitle)
 	}
@@ -176,7 +192,6 @@ element_end :: proc() {
 // The drag is resolved here, before the container opens, so the new offset
 // lands in this frame's layout.
 scroll_begin :: proc(id: string) -> bool {
-	st := styles.scroll
 	scroll_track(id)
 	scrollbar_drag(id)
 	clay.OpenElementWithId(clay.ID(id))
@@ -184,8 +199,8 @@ scroll_begin :: proc(id: string) -> bool {
 		layout = {
 			sizing          = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 			layoutDirection = .TopToBottom,
-			padding         = clay.PaddingAll(st.padding),
-			childGap        = st.gap,
+			padding         = clay.PaddingAll(scroll_padding()),
+			childGap        = theme.gap_md * 2,
 			childAlignment  = {x = .Center},
 		},
 		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
@@ -205,7 +220,6 @@ _scroll_grab: f32
 // opens, so the new offset lands in this frame's layout.
 @(private)
 scrollbar_drag :: proc(id: string) {
-	st := styles.scroll
 	thumb_id := fmt.tprintf("%s_thumb", id)
 	data := clay.GetScrollContainerData(clay.ID(id))
 	if !drag_update(thumb_id) || !data.found {
@@ -213,13 +227,13 @@ scrollbar_drag :: proc(id: string) {
 	}
 	thumb, t_ok := element_box(thumb_id)
 	view, v_ok := element_box(id)
-	travel := data.scrollContainerDimensions.height - 2 * st.inset - thumb.height
+	travel := data.scrollContainerDimensions.height - 2 * SCROLL_INSET - thumb.height
 	max_scroll := data.contentDimensions.height - data.scrollContainerDimensions.height
 	if t_ok && v_ok && travel > 0 && max_scroll > 0 {
 		if mouse_pressed(.Left) {
 			_scroll_grab = input.mouse_y - thumb.y
 		}
-		t := math.clamp((input.mouse_y - _scroll_grab - view.y - st.inset) / travel, 0, 1)
+		t := math.clamp((input.mouse_y - _scroll_grab - view.y - SCROLL_INSET) / travel, 0, 1)
 		scroll_jump(id, -t * max_scroll)
 	}
 }
@@ -228,29 +242,28 @@ scrollbar_drag :: proc(id: string) {
 // overflows. Call after the container closes.
 @(private)
 scrollbar :: proc(id: string) {
-	st := styles.scroll
 	data := clay.GetScrollContainerData(clay.ID(id))
 	view := data.scrollContainerDimensions.height
 	content := data.contentDimensions.height
 	if !data.found || content <= view + 0.5 {
 		return
 	}
-	track := view - 2 * st.inset
-	thumb_h := math.clamp(track * view / content, st.min_thumb, track)
+	track := view - 2 * SCROLL_INSET
+	thumb_h := math.clamp(track * view / content, SCROLL_MIN_THUMB, track)
 	t := math.clamp(-data.scrollPosition.y / (content - view), 0, 1)
 
 	thumb_id := fmt.tprintf("%s_thumb", id)
 	hk := anim(thumb_id, 1 if hovered(thumb_id) || dragging(thumb_id) else 0, theme.motion.hover)
-	w := st.width * (1 + 0.4 * hk)
+	w := SCROLL_WIDTH * (1 + 0.4 * hk)
 	if clay.UI(clay.ID(thumb_id))(clay.ElementDeclaration{
 		layout          = {sizing = {width = clay.SizingFixed(w), height = clay.SizingFixed(thumb_h)}},
-		backgroundColor = mix(st.thumb, st.thumb_hot, hk),
+		backgroundColor = mix(theme.surface, theme.text_dim, hk),
 		cornerRadius    = clay.CornerRadiusAll(w * 0.5),
 		floating = {
 			attachTo   = .ElementWithId,
 			parentId   = clay.ID(id).id,
 			attachment = {element = .RightTop, parent = .RightTop},
-			offset     = {-st.inset, st.inset + t * (track - thumb_h)},
+			offset     = {-SCROLL_INSET, SCROLL_INSET + t * (track - thumb_h)},
 			zIndex     = 5,
 		},
 	}) {}
@@ -306,23 +319,22 @@ Button_Opts :: struct {
 }
 
 button :: proc(id, label: string, opts: Button_Opts = {}) -> bool {
-	st := styles.button
 	hot, held := press_state(id, opts.force, opts.disabled)
-	rest, over, tc := st.bg, st.bg_hover, st.text
+	rest, over, tc := theme.surface, theme.surface_hot, theme.text
 	if opts.accent {
-		rest, over, tc = st.accent_bg, st.accent_hover, st.text_on_accent
+		rest, over, tc = theme.accent, theme.accent_hot, theme.text_on_accent
 	}
 	if opts.disabled {
-		rest, over, tc = st.bg, st.bg, theme.text_dim
+		rest, over, tc = theme.surface, theme.surface, theme.text_dim
 	}
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
-			sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)},
+			sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(theme.row_h)},
 			childAlignment = {x = .Center, y = .Center},
 			padding        = clay.Padding{theme.pad_md, theme.pad_md, 0, 0},
 		},
 		backgroundColor = feedback(id, rest, over, hot, held),
-		cornerRadius    = clay.CornerRadiusAll(st.radius),
+		cornerRadius    = clay.CornerRadiusAll(theme.radius_sm),
 	}) {
 		text(label, theme.font_small, theme.size_small, tc)
 	}
@@ -341,22 +353,21 @@ Icon :: enum {
 
 // Small square button. Returns true on click. The chevron is a Custom triangle.
 icon_button :: proc(id: string, icon: Icon = .ChevronLeft) -> bool {
-	st := styles.icon
-	sz := st.size
+	sz := ICON_SIZE
 	hot, held := press_state(id)
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
 			sizing         = {width = clay.SizingFixed(sz), height = clay.SizingFixed(sz)},
 			childAlignment = {x = .Center, y = .Center},
 		},
-		backgroundColor = feedback(id, st.bg, st.bg_hover, hot, held),
-		cornerRadius    = clay.CornerRadiusAll(st.radius),
+		backgroundColor = feedback(id, theme.surface, theme.surface_hot, hot, held),
+		cornerRadius    = clay.CornerRadiusAll(theme.radius_sm),
 	}) {}
 	// Chevron from previous-frame box (one-frame lag on first show is fine).
 	if box, ok := element_box(id); ok {
 		cx := box.x + box.width * 0.5
 		cy := box.y + box.height * 0.5
-		col := st.glyph
+		col := theme.text
 		#partial switch icon {
 		case .ChevronLeft:
 			custom_triangle_at(fmt.tprintf("%s_ico", id), id, {cx - 4.5, cy}, {cx + 3.5, cy - 5.5}, {cx + 3.5, cy + 5.5}, col)
@@ -371,18 +382,17 @@ icon_button :: proc(id: string, icon: Icon = .ChevronLeft) -> bool {
 
 // A pill that fills with the accent when on.
 toggle :: proc(id, label: string, on: bool) -> bool {
-	st := styles.toggle
 	hot, held := press_state(id)
 	k := anim(id, 1 if on else 0, theme.motion.change)
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
-			sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)},
+			sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(theme.row_h)},
 			childAlignment = {x = .Center, y = .Center},
 		},
-		backgroundColor = feedback(id, mix(st.bg, st.on_bg, k), mix(st.bg_hover, st.on_hover, k), hot, held),
-		cornerRadius    = clay.CornerRadiusAll(st.radius),
+		backgroundColor = feedback(id, mix(theme.surface, theme.accent, k), mix(theme.surface_hot, theme.accent_hot, k), hot, held),
+		cornerRadius    = clay.CornerRadiusAll(theme.radius_sm),
 	}) {
-		text(label, theme.font_small, theme.size_small, mix(st.text, st.on_text, k))
+		text(label, theme.font_small, theme.size_small, mix(theme.text, theme.text_on_accent, k))
 	}
 	if clicked(id) {
 		return !on
@@ -393,16 +403,15 @@ toggle :: proc(id, label: string, on: bool) -> bool {
 // A label and an on/off switch; the whole row toggles. The knob slides with
 // the change duration and the bounce.
 toggle_switch :: proc(id, label: string, on: bool) -> bool {
-	st := styles.toggle
 	track_id := fmt.tprintf("%s_track", id)
-	track_h := math.round(st.height * 0.66)
+	track_h := math.round(theme.row_h * 0.66)
 	track_w := math.round(track_h * 1.75)
 	hot, held := press_state(id)
 	k := anim(id, 1 if on else 0, theme.motion.change, theme.motion.bounce)
 	kc := math.clamp(k, 0, 1)
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
-			sizing          = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)},
+			sizing          = {width = clay.SizingGrow({}), height = clay.SizingFixed(theme.row_h)},
 			layoutDirection = .LeftToRight,
 			childAlignment  = {y = .Center},
 			childGap        = theme.gap_md,
@@ -411,11 +420,11 @@ toggle_switch :: proc(id, label: string, on: bool) -> bool {
 		if clay.UI(clay.ID(id, 1))(clay.ElementDeclaration{
 			layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFit({})}},
 		}) {
-			text(label, theme.font_small, theme.size_small, st.text)
+			text(label, theme.font_small, theme.size_small, theme.text)
 		}
 		if clay.UI(clay.ID(track_id))(clay.ElementDeclaration{
 			layout          = {sizing = {width = clay.SizingFixed(track_w), height = clay.SizingFixed(track_h)}},
-			backgroundColor = feedback(id, mix(st.bg, st.on_bg, kc), mix(st.bg_hover, st.on_hover, kc), hot, held),
+			backgroundColor = feedback(id, mix(theme.surface, theme.accent, kc), mix(theme.surface_hot, theme.accent_hot, kc), hot, held),
 			cornerRadius    = clay.CornerRadiusAll(track_h * 0.5),
 		}) {}
 	}
@@ -423,7 +432,7 @@ toggle_switch :: proc(id, label: string, on: bool) -> bool {
 		pad := max(2, math.round(track_h * 0.12))
 		r := track_h * 0.5 - pad
 		x := box.x + pad + r + k * (box.width - 2 * pad - 2 * r)
-		custom_circle_at(fmt.tprintf("%s_knob", id), track_id, x, box.y + box.height * 0.5, r, mix(st.knob, st.on_text, kc))
+		custom_circle_at(fmt.tprintf("%s_knob", id), track_id, x, box.y + box.height * 0.5, r, mix(theme.text, theme.text_on_accent, kc))
 	}
 	if clicked(id) {
 		return !on
@@ -438,7 +447,6 @@ toggle_switch :: proc(id, label: string, on: bool) -> bool {
 // follows a drag closely, and grows while hovered. Returns the (possibly new)
 // value.
 slider :: proc(id, label: string, value: f32, lo, hi: f32, value_fmt: string = "%.2f") -> f32 {
-	st := styles.slider
 	v := drag_value_x(id, value, lo, hi)
 	drag := dragging(id)
 	hot := drag || hovered(id)
@@ -454,15 +462,15 @@ slider :: proc(id, label: string, value: f32, lo, hi: f32, value_fmt: string = "
 		if clay.UI(clay.ID(id, 2))(clay.ElementDeclaration{
 			layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFit({})}},
 		}) {
-			text(label, theme.font_small, theme.size_small, st.label)
+			text(label, theme.font_small, theme.size_small, theme.text)
 		}
-		text(value_text, theme.font_small, theme.size_small, st.value)
+		text(value_text, theme.font_small, theme.size_small, theme.accent)
 	}
 
 	t := math.clamp((v - lo) / (hi - lo), 0, 1) if hi != lo else 0
 	tk := anim(id, t, 0.05 if drag else theme.motion.change)
 	hk := anim(id, 1 if hot else 0, theme.motion.hover, channel = 1)
-	hit_h := max(st.knob_r * 2 + 4, st.height)
+	hit_h := max(knob_radius() * 2 + 4, theme.slider_h)
 	fill_w: f32
 	if box, ok := element_box(id); ok {
 		fill_w = math.clamp(tk, 0, 1) * box.width
@@ -474,14 +482,14 @@ slider :: proc(id, label: string, value: f32, lo, hi: f32, value_fmt: string = "
 		},
 	}) {
 		if clay.UI(clay.ID(id, 3))(clay.ElementDeclaration{
-			layout          = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)}},
-			backgroundColor = st.track,
-			cornerRadius    = clay.CornerRadiusAll(st.height * 0.5),
+			layout          = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(theme.slider_h)}},
+			backgroundColor = theme.surface,
+			cornerRadius    = clay.CornerRadiusAll(theme.slider_h * 0.5),
 		}) {
 			if clay.UI(clay.ID(id, 4))(clay.ElementDeclaration{
 				layout          = {sizing = {width = clay.SizingFixed(fill_w), height = clay.SizingGrow({})}},
-				backgroundColor = st.fill if fill_w >= st.height else clear_of(st.fill),
-				cornerRadius    = clay.CornerRadiusAll(st.height * 0.5),
+				backgroundColor = theme.accent if fill_w >= theme.slider_h else clear_of(theme.accent),
+				cornerRadius    = clay.CornerRadiusAll(theme.slider_h * 0.5),
 			}) {}
 		}
 	}
@@ -491,9 +499,9 @@ slider :: proc(id, label: string, value: f32, lo, hi: f32, value_fmt: string = "
 	if box, ok := element_box(id); ok {
 		x := box.x + tk * box.width
 		cy := box.y + box.height * 0.5
-		r := st.knob_r * (1 + 0.25 * hk)
-		custom_circle_at(fmt.tprintf("%s_knob", id), id, x, cy, r, st.knob)
-		custom_circle_at(fmt.tprintf("%s_knob_in", id), id, x, cy, r * 0.5, st.knob_inner)
+		r := knob_radius() * (1 + 0.25 * hk)
+		custom_circle_at(fmt.tprintf("%s_knob", id), id, x, cy, r, theme.accent)
+		custom_circle_at(fmt.tprintf("%s_knob_in", id), id, x, cy, r * 0.5, theme.bg)
 	}
 	return v
 }
@@ -512,24 +520,23 @@ dropdown :: proc(
 	options: []string,
 	selected: int,
 ) -> int {
-	st := styles.dropdown
 	result := selected
 	hot, held := press_state(id)
 
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
-			sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height + 2)},
+			sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(theme.row_h + 2)},
 			childAlignment = {x = .Left, y = .Center},
 			padding        = clay.Padding{theme.pad_md, theme.pad_md + 16, 0, 0},
 		},
-		backgroundColor = feedback(id, st.bg, st.bg_hover, hot || state.open, held),
-		cornerRadius    = clay.CornerRadiusAll(st.radius),
+		backgroundColor = feedback(id, theme.surface, theme.surface_hot, hot || state.open, held),
+		cornerRadius    = clay.CornerRadiusAll(theme.radius_sm),
 	}) {
 		shown := label
 		if selected >= 0 && selected < len(options) {
 			shown = options[selected]
 		}
-		text(shown, theme.font_small, theme.size_small, st.text)
+		text(shown, theme.font_small, theme.size_small, theme.text)
 	}
 
 	// Chevron (previous-frame trigger box); turns over as the menu opens.
@@ -562,9 +569,9 @@ dropdown :: proc(
 				childGap        = 2,
 				padding         = clay.PaddingAll(3),
 			},
-			backgroundColor = st.menu_bg,
+			backgroundColor = theme.panel,
 			border = {
-				color = st.menu_border,
+				color = theme.border,
 				width = clay.BorderWidth{1, 1, 1, 1, 0},
 			},
 			cornerRadius = clay.CornerRadiusAll(theme.radius_md),
@@ -582,20 +589,20 @@ dropdown :: proc(
 			for opt, i in options {
 				item_id := fmt.tprintf("%s_item_%d", id, i)
 				i_hot, i_held := press_state(item_id)
-				bg := feedback(item_id, clear_of(st.bg_hover), st.bg_hover, i_hot, i_held)
-				tc := st.text
+				bg := feedback(item_id, clear_of(theme.surface_hot), theme.surface_hot, i_hot, i_held)
+				tc := theme.text
 				if i == selected {
-					bg = st.selected_bg
-					tc = st.selected_text
+					bg = theme.accent
+					tc = theme.text_on_accent
 				}
 				if clay.UI(clay.ID(item_id))(clay.ElementDeclaration{
 					layout = {
-						sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)},
+						sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(theme.row_h)},
 						childAlignment = {x = .Left, y = .Center},
 						padding        = clay.Padding{theme.pad_md - 3, theme.pad_md - 3, 0, 0},
 					},
 					backgroundColor = bg,
-					cornerRadius    = clay.CornerRadiusAll(max(0, st.radius - 1)),
+					cornerRadius    = clay.CornerRadiusAll(max(0, theme.radius_sm - 1)),
 				}) {
 					text(opt, theme.font_small, theme.size_small, tc)
 				}
@@ -711,7 +718,7 @@ color_picker :: proc(id: string, c: Color) -> (out: Color, changed: bool) {
 // A 0..1 slider over a gradient track, the knob showing the color under it.
 gradient_slider :: proc(id: string, t: f32, stops: []Color) -> f32 {
 	stops := stops[:min(len(stops), GRADIENT_STOPS)]
-	h := max(14, styles.slider.height * 2)
+	h := max(14, theme.slider_h * 2)
 	nt := drag_value_x(id, t, 0, 1, h * 0.5) // the knob travels inset by its radius
 	d := Custom_Data{kind = .Gradient}
 	for c, i in stops {
@@ -740,13 +747,12 @@ gradient_slider :: proc(id: string, t: f32, stops: []Color) -> f32 {
 // underline sits on the bar's bottom border; it slides to a new selection.
 // Returns the selected index.
 tab_bar :: proc(id: string, labels: []string, selected: int) -> int {
-	st := styles.tab_bar
 	result := selected
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
 			sizing          = {width = clay.SizingFit({}), height = clay.SizingGrow({})},
 			layoutDirection = .LeftToRight,
-			childGap        = st.gap,
+			childGap        = TAB_GAP,
 		},
 	}) {
 		for label, i in labels {
@@ -754,8 +760,8 @@ tab_bar :: proc(id: string, labels: []string, selected: int) -> int {
 			on := i == selected
 			hk := anim(item, 1 if !on && hovered(item) else 0, theme.motion.hover)
 			ok := anim(item, 1 if on else 0, theme.motion.change, channel = 1)
-			tc := mix(mix(st.text, st.text_hover, hk), st.text_on, ok)
-			line := st.underline_hover
+			tc := mix(mix(theme.text_dim, theme.text, hk), theme.text, ok)
+			line := theme.border
 			line.a *= hk
 			if clay.UI(clay.ID(item))(clay.ElementDeclaration{
 				layout = {
@@ -766,14 +772,14 @@ tab_bar :: proc(id: string, labels: []string, selected: int) -> int {
 				if clay.UI(clay.ID(item, 1))(clay.ElementDeclaration{
 					layout = {
 						sizing         = {width = clay.SizingFit({}), height = clay.SizingGrow({})},
-						padding        = clay.Padding{st.pad_x, st.pad_x, 0, 0},
+						padding        = clay.Padding{theme.pad_md, theme.pad_md, 0, 0},
 						childAlignment = {x = .Center, y = .Center},
 					},
 				}) {
 					text(label, theme.font_body, theme.size_body, tc)
 				}
 				if clay.UI(clay.ID(item, 2))(clay.ElementDeclaration{
-					layout          = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.underline_h)}},
+					layout          = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(TAB_UNDERLINE)}},
 					backgroundColor = line,
 				}) {}
 			}
@@ -788,11 +794,11 @@ tab_bar :: proc(id: string, labels: []string, selected: int) -> int {
 			x := anim(id, sel.x - bar.x, theme.motion.change, theme.motion.bounce)
 			w := anim(id, sel.width, theme.motion.change, theme.motion.bounce, channel = 1)
 			if clay.UI(clay.ID(id, 1))(clay.ElementDeclaration{
-				layout          = {sizing = {width = clay.SizingFixed(max(0, w)), height = clay.SizingFixed(st.underline_h)}},
-				backgroundColor = st.underline,
+				layout          = {sizing = {width = clay.SizingFixed(max(0, w)), height = clay.SizingFixed(TAB_UNDERLINE)}},
+				backgroundColor = theme.accent,
 				floating = {
 					attachTo           = .Parent,
-					offset             = {x, bar.height - st.underline_h},
+					offset             = {x, bar.height - TAB_UNDERLINE},
 					zIndex             = 1,
 					pointerCaptureMode = .Passthrough,
 				},
@@ -806,26 +812,25 @@ tab_bar :: proc(id: string, labels: []string, selected: int) -> int {
 // an accent pill that slides between them. Returns the selected index; -1
 // selects none.
 tabs :: proc(id: string, labels: []string, selected: int) -> int {
-	st := styles.toggle
 	result := selected
 	PAD :: 3
 	pos := anim(id, f32(selected), theme.motion.change, theme.motion.bounce)
-	inner_r := max(0, st.radius - PAD * 0.5)
+	inner_r := max(0, theme.radius_sm - PAD * 0.5)
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
-			sizing          = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)},
+			sizing          = {width = clay.SizingGrow({}), height = clay.SizingFixed(theme.row_h)},
 			layoutDirection = .LeftToRight,
 			padding         = clay.PaddingAll(PAD),
 		},
-		backgroundColor = st.bg,
-		cornerRadius    = clay.CornerRadiusAll(st.radius),
+		backgroundColor = theme.surface,
+		cornerRadius    = clay.CornerRadiusAll(theme.radius_sm),
 	}) {
 		// Floating, so it can sit between segments; labels float above it.
 		if box, ok := element_box(id); ok && len(labels) > 0 && selected >= 0 {
 			w := (box.width - 2 * PAD) / f32(len(labels))
 			if clay.UI(clay.ID(id, 1))(clay.ElementDeclaration{
 				layout          = {sizing = {width = clay.SizingFixed(w), height = clay.SizingFixed(box.height - 2 * PAD)}},
-				backgroundColor = st.on_bg,
+				backgroundColor = theme.accent,
 				cornerRadius    = clay.CornerRadiusAll(inner_r),
 				floating = {
 					attachTo           = .Parent,
@@ -846,7 +851,7 @@ tabs :: proc(id: string, labels: []string, selected: int) -> int {
 			}
 			if clay.UI(clay.ID(item))(clay.ElementDeclaration{
 				layout          = {sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})}},
-				backgroundColor = feedback(item, clear_of(st.bg_hover), st.bg_hover, hot, held),
+				backgroundColor = feedback(item, clear_of(theme.surface_hot), theme.surface_hot, hot, held),
 				cornerRadius    = clay.CornerRadiusAll(inner_r),
 			}) {
 				if clay.UI(clay.ID(item, 1))(clay.ElementDeclaration{
@@ -859,7 +864,7 @@ tabs :: proc(id: string, labels: []string, selected: int) -> int {
 						clipTo             = .AttachedParent,
 					},
 				}) {
-					text(label, theme.font_small, theme.size_small, mix(st.text, st.on_text, on_k))
+					text(label, theme.font_small, theme.size_small, mix(theme.text, theme.text_on_accent, on_k))
 				}
 			}
 			if clicked(item) {

@@ -148,7 +148,6 @@ init :: proc(desc: Window_Desc) {
 
 	clay_setup(desc)
 	theme.palette = palette_from_base(BASE_DARK)
-	reset_styles()
 	custom_setup()
 	shapes_setup()
 	perf_setup()

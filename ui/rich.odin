@@ -82,7 +82,7 @@ rich_text :: proc(id: string, spans: []Span, opts := Rich_Opts{}) -> (res: Rich_
 	if width <= 0 {
 		width = screen_w * 0.6
 	}
-	line := opts.line if opts.line > 0 else styles.field.line
+	line := opts.line if opts.line > 0 else FIELD_LINE
 	r := rich_layout(eid.id, spans, width, line, opts)
 	res.height = r.height
 
@@ -721,7 +721,7 @@ draw_rich :: proc(r: ^Rich_Layout, box: clay.BoundingBox) {
 // The selected part of each frag, the height of its line.
 @(private = "file")
 draw_selection :: proc(r: ^Rich_Layout, box: clay.BoundingBox) {
-	color := styles.field.selection
+	color := selection_color()
 	for f in r.frags {
 		s, e := max(f.start, r.sel_lo), min(f.end, r.sel_hi)
 		if s >= e { continue }

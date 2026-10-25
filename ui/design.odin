@@ -140,8 +140,6 @@ apply_design :: proc(d: Design, mode: Maybe(Theme_Mode) = .Dark, fade: f32 = 0) 
 	}
 	if m, ok := mode.?; ok {
 		set_palette(design_palette(m), fade)
-	} else {
-		reset_styles()
 	}
 }
 
