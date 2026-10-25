@@ -8,16 +8,10 @@ import "core:math"
 //
 // Components are single-call: they build Clay chrome *and* resolve interaction
 // against previous-frame geometry, returning the new value/click in one shot.
-// Decorations (knobs, chevrons) are Clay Custom/floating elements so every
-// backend renders them through the normal clay command stream.
+// Decorations (knobs, chevrons) are floating or Custom elements, so they draw
+// in Clay's order and clip with their container.
 
 // --- layout chrome ----------------------------------------------------------
-
-spacer :: proc(id: string) {
-	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
-		layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})}},
-	}) {}
-}
 
 divider :: proc(id: string) {
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
@@ -27,7 +21,7 @@ divider :: proc(id: string) {
 }
 
 // Full-window root with background fill. Use transparent=true when the host
-// draws content underneath the UI (see host_raylib / host_sokol).
+// draws content underneath the UI (ui.draw_* between begin_draw and render).
 root_begin :: proc(id: string = "Root", transparent: bool = false, direction: clay.LayoutDirection = .LeftToRight) -> bool {
 	clay.OpenElementWithId(clay.ID(id))
 	bg := theme.bg
@@ -43,44 +37,27 @@ root_begin :: proc(id: string = "Root", transparent: bool = false, direction: cl
 	})
 }
 
-Panel_Opts :: struct {
-	// Mask children horizontally to the panel bounds — lets an animated width
-	// "fold" the panel while clipping the reflowing content (scissor).
-	clip_x: bool,
-}
-
 // Side panel column. Scrolls when its content is taller than the window;
 // close it with panel_end(id), which draws the scrollbar.
-panel_begin :: proc(id: string = "Panel", width: f32 = 0, opts: Panel_Opts = {}) -> bool {
-	w := width if width > 0 else theme.panel_w
+panel_begin :: proc(id: string = "Panel") -> bool {
 	scroll_track(id)
 	scrollbar_drag(id)
 	clay.OpenElementWithId(clay.ID(id))
 	return clay.ConfigureOpenElement(clay.ElementDeclaration{
 		layout = {
-			sizing          = {width = clay.SizingFixed(w), height = clay.SizingGrow({})},
+			sizing          = {width = clay.SizingFixed(theme.panel_w), height = clay.SizingGrow({})},
 			layoutDirection = .TopToBottom,
 			padding         = clay.PaddingAll(styles.panel.padding),
 			childGap        = styles.panel.gap,
 		},
 		backgroundColor = styles.panel.bg,
-		clip            = {horizontal = opts.clip_x, vertical = true, childOffset = clay.GetScrollOffset()},
+		clip            = {vertical = true, childOffset = clay.GetScrollOffset()},
 	})
 }
 
 panel_end :: proc(id: string = "Panel") {
 	clay.CloseElement()
 	scrollbar(id)
-}
-
-// Growable content area (e.g. canvas). Host draws into this via region/clip.
-// Fills with theme.canvas unless `bg` is given ({} for none).
-canvas_begin :: proc(id: string = "Canvas", bg: Maybe(Color) = nil) -> bool {
-	clay.OpenElementWithId(clay.ID(id))
-	return clay.ConfigureOpenElement(clay.ElementDeclaration{
-		layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})}},
-		backgroundColor = bg.? or_else theme.canvas,
-	})
 }
 
 // Full-width bar with a bottom border, children in a centered row. Put it
@@ -182,7 +159,7 @@ swatch :: proc(id: string, color: Color, width: f32 = 0, height: f32 = 0, radius
 	}) {}
 }
 
-// Closes a container opened by root_begin, canvas_begin, top_bar_begin,
+// Closes a container opened by root_begin, top_bar_begin,
 // row_begin, column_begin, or card_begin. (panel_begin and scroll_begin have
 // their own _end, which also draws the scrollbar.)
 element_end :: proc() {
@@ -293,7 +270,7 @@ press_state :: proc(id: string, force: Force = .None, disabled := false) -> (hot
 	if disabled {
 		return
 	}
-	hot = s_interactions_enabled && hovered(id)
+	hot = hovered(id)
 	held = hot && mouse_down(.Left)
 	switch force {
 	case .None:
@@ -324,7 +301,6 @@ clear_of :: proc(c: Color) -> Color {
 
 Button_Opts :: struct {
 	accent:   bool,
-	height:   f32,
 	disabled: bool,
 	force:    Force,
 }
@@ -339,10 +315,9 @@ button :: proc(id, label: string, opts: Button_Opts = {}) -> bool {
 	if opts.disabled {
 		rest, over, tc = st.bg, st.bg, theme.text_dim
 	}
-	h := opts.height if opts.height > 0 else st.height
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
-			sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(h)},
+			sizing         = {width = clay.SizingGrow({}), height = clay.SizingFixed(st.height)},
 			childAlignment = {x = .Center, y = .Center},
 			padding        = clay.Padding{theme.pad_md, theme.pad_md, 0, 0},
 		},
@@ -364,11 +339,10 @@ Icon :: enum {
 	ChevronRight,
 }
 
-// Small square button. Returns true on click. Chevron is drawn as a Clay Custom
-// triangle (any backend renders it).
-icon_button :: proc(id: string, icon: Icon = .ChevronLeft, size: f32 = 0) -> bool {
+// Small square button. Returns true on click. The chevron is a Custom triangle.
+icon_button :: proc(id: string, icon: Icon = .ChevronLeft) -> bool {
 	st := styles.icon
-	sz := size if size > 0 else st.size
+	sz := st.size
 	hot, held := press_state(id)
 	if clay.UI(clay.ID(id))(clay.ElementDeclaration{
 		layout = {
@@ -467,7 +441,7 @@ slider :: proc(id, label: string, value: f32, lo, hi: f32, value_fmt: string = "
 	st := styles.slider
 	v := drag_value_x(id, value, lo, hi)
 	drag := dragging(id)
-	hot := drag || (s_interactions_enabled && hovered(id))
+	hot := drag || hovered(id)
 
 	value_text := fmt.tprintf(value_fmt, v)
 	if clay.UI(clay.ID(id, 1))(clay.ElementDeclaration{
@@ -759,19 +733,6 @@ gradient_slider :: proc(id: string, t: f32, stops: []Color) -> f32 {
 		custom_circle_at(fmt.tprintf("%s_dot", id), id, x, cy, r - 1, under)
 	}
 	return nt
-}
-
-@(private)
-picker_tick :: proc() {
-	stale := make([dynamic]u32, context.temp_allocator)
-	for key, p in s_pickers {
-		if p.seen + 1 < s_frame {
-			append(&stale, key)
-		}
-	}
-	for key in stale {
-		delete_key(&s_pickers, key)
-	}
 }
 
 // Navigation tabs for a top bar: text labels, the selected one underlined in

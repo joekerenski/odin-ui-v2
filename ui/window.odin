@@ -12,7 +12,7 @@ import rl "../deps/raylib"
 // It can sit below the requested zoom: see fit_zoom.
 zoom: f32 = 1
 
-ZOOM_STEPS := [?]f32{0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2}
+ZOOM_STEPS :: [?]f32{0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2}
 
 @(private)
 pending_zoom: f32 = 1
@@ -90,8 +90,7 @@ zoom_out :: proc() {
 // Ctrl + = / - / 0 (Cmd on macOS), keypad too. Shift is allowed, since + is
 // Shift+= on most layouts.
 zoom_shortcuts :: proc() {
-	mod: Mod = .Super when ODIN_OS == .Darwin else .Ctrl
-	if mod not_in input.mods || input.mods - {mod, .Shift} != {} {
+	if PRIMARY_MOD not_in input.mods || input.mods - {PRIMARY_MOD, .Shift} != {} {
 		return
 	}
 	if key_pressed(.Plus) || key_pressed(.KP_Add) {
@@ -141,26 +140,11 @@ request_cursor :: proc(c: Cursor) {
 toggle_fullscreen :: proc() {
 	when ODIN_OS == .Darwin {
 		darwin_toggle_fullscreen()
-	} else when ODIN_OS == .Linux {
+	} else {
 		if wayland_active() {
 			wayland_toggle_fullscreen()
 		} else {
 			rl.ToggleFullscreen()
 		}
-	} else {
-		rl.ToggleFullscreen()
-	}
-}
-
-is_fullscreen :: proc() -> bool {
-	when ODIN_OS == .Darwin {
-		return darwin_is_fullscreen()
-	} else when ODIN_OS == .Linux {
-		if wayland_active() {
-			return wayland_is_fullscreen()
-		}
-		return rl.IsWindowFullscreen()
-	} else {
-		return rl.IsWindowFullscreen()
 	}
 }

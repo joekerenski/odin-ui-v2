@@ -9,8 +9,8 @@ import "core:math"
 //   1. Emits Clay layout (during begin_layout … end_layout)
 //   2. Hit-tests with previous-frame geometry (element_box / clicked / hovered)
 //   3. Returns interaction results in the same call (single-call API)
-//   4. Never touches a backend API — decorations go through Clay (rects, text,
-//      floating children, or Custom primitives below) so every backend renders them
+//   4. Never draws itself: decorations go through Clay (rects, text, floating
+//      children, or the Custom primitives below), so they draw in Clay's order
 //
 // Example:
 //
@@ -29,8 +29,10 @@ import "core:math"
 
 // --- interaction (previous-frame geometry) ----------------------------------
 
+// The pointer is over the element, as Clay hit-tests it: not under a
+// capturing floating menu, not scrolled out of its clip.
 hovered :: proc(id: string, index: u32 = 0) -> bool {
-	return element_hovered(id, index)
+	return clay.PointerOver(clay.ID(id, index))
 }
 
 // True while LMB is held over the element, or while a drag started on it.
@@ -54,10 +56,8 @@ drag_update :: proc(id: string) -> bool {
 	if mouse_released(.Left) && _drag_id == hash {
 		_drag_id = 0
 	}
-	if _drag_id == 0 && mouse_pressed(.Left) && element_hovered(id) {
-		if s_interactions_enabled {
-			_drag_id = hash
-		}
+	if _drag_id == 0 && mouse_pressed(.Left) && hovered(id) {
+		_drag_id = hash
 	}
 	return _drag_id == hash && mouse_down(.Left)
 }
@@ -76,7 +76,7 @@ drag_value_x :: proc(id: string, value, lo, hi: f32, inset: f32 = 0) -> f32 {
 	return lo + t * (hi - lo)
 }
 
-// --- Clay Custom primitives (backend-rendered) ------------------------------
+// --- Clay Custom primitives -------------------------------------------------
 //
 // Geometry is *relative to the command's bounding box* so floating children
 // clip with their parent (panel fold, scroll). Stored in a frame arena so
@@ -229,7 +229,7 @@ custom_triangle_at :: proc(id, parent_id: string, a, b, c: [2]f32, color: Color,
 	}) {}
 }
 
-// Dispatch a Clay .Custom command — called from each backend's clay renderer.
+// Draw a Clay .Custom command; render calls this.
 // Geometry is relative to cmd.boundingBox.
 @(private)
 dispatch_custom :: proc(cmd: ^clay.RenderCommand) {

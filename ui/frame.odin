@@ -10,6 +10,8 @@ import "core:time"
 import rl "../deps/raylib"
 import rlgl "../deps/raylib/rlgl"
 
+#assert(ODIN_OS == .Darwin || ODIN_OS == .Linux, "ui runs on macOS and Linux")
+
 Region_Box :: clay.BoundingBox
 
 // The window, the frame loop and Clay's lifecycle. Zoom, clipboard and cursor are in
@@ -24,7 +26,7 @@ Region_Box :: clay.BoundingBox
 //       // widgets
 //       cmds := ui.end_layout()
 //       ui.begin_draw()
-//       // host drawing (raylib), clipped to a region if you want
+//       // host drawing (ui.draw_*), clipped to an element if you want
 //       ui.render(&cmds)
 //       ui.end_draw()
 //   }
@@ -81,20 +83,7 @@ target_fps: i32
 clay_memory: []u8
 
 @(private)
-last_cmd_count: int
-
-@(private)
-shown_fps: i32
-
-@(private)
-fps_acc: f32
-
-@(private)
-fps_frames: int
-
-@(private)
 shapes_tex: rl.Texture2D
-
 
 // Pixels per point the glyph cache holds (display scale * zoom).
 @(private)
@@ -136,8 +125,8 @@ init :: proc(desc: Window_Desc) {
 	if desc.min_width > 0 || desc.min_height > 0 {
 		rl.SetWindowMinSize(desc.min_width, desc.min_height)
 	}
-	// UI fills are triangles that sample this texel; raylib's own shape calls
-	// use it too.
+	// A white texel: the texture bound for shapes, and raylib's own shape
+	// calls sample it (a host drawing with rl.*).
 	white := rl.GenImageColor(1, 1, rl.WHITE)
 	shapes_tex = rl.LoadTextureFromImage(white)
 	rl.UnloadImage(white)
@@ -158,6 +147,7 @@ init :: proc(desc: Window_Desc) {
 	input = {}
 
 	clay_setup(desc)
+	theme.palette = palette_from_base(BASE_DARK)
 	reset_styles()
 	custom_setup()
 	shapes_setup()
@@ -210,6 +200,7 @@ frame :: proc() -> bool {
 
 	theme_tick(frame_dt)
 	anim_tick()
+	edit_tick()
 
 	// A new display scale (moved to another screen) or zoom draws text at
 	// new pixel sizes: the glyphs at the old ones go, and Clay re-measures.
@@ -218,18 +209,6 @@ frame :: proc() -> bool {
 		loaded_scale = scale
 		glyph_cache_clear()
 		s_text_cache_full = true
-	}
-
-	// One-frame rate until the first half-second average exists.
-	if shown_fps == 0 && frame_dt > 0 {
-		shown_fps = i32(math.round(1.0 / frame_dt))
-	}
-	fps_acc += frame_dt
-	fps_frames += 1
-	if fps_acc >= 0.5 {
-		shown_fps = i32(math.round(f32(fps_frames) / fps_acc))
-		fps_acc = 0
-		fps_frames = 0
 	}
 
 	perf_mark_ready()
@@ -243,7 +222,7 @@ frame_wait :: proc() {
 		darwin_pace()
 		frame_start = time.now()
 		rl.PollInputEvents()
-	} else when ODIN_OS == .Linux {
+	} else {
 		if wayland_active() {
 			// Idle, no frame callback comes (nothing was committed): the wait gives up after
 			// 100 ms, so input is looked at ten times a second.
@@ -253,12 +232,10 @@ frame_wait :: proc() {
 		} else {
 			raylib_wait()
 		}
-	} else {
-		raylib_wait()
 	}
 }
 
-// raylib's own loop (X11, Windows): EndDrawing waits and polls; an idle tick, which doesn't
+// raylib's own loop (X11): EndDrawing waits and polls; an idle tick, which doesn't
 // draw, sleeps one frame at the target rate and polls itself.
 @(private)
 raylib_wait :: proc() {
@@ -274,10 +251,6 @@ raylib_wait :: proc() {
 		}
 	}
 	frame_start = time.now()
-}
-
-fps :: proc() -> i32 {
-	return shown_fps
 }
 
 @(private)
@@ -330,15 +303,15 @@ begin_layout :: proc() {
 	clay.SetLayoutDimensions({screen_w, screen_h})
 	clay.SetPointerState({input.mouse_x, input.mouse_y}, mouse_down(.Left))
 	idle_begin_frame()
-	restore := scroll_before_wheel()
+	scroll_before_wheel()
 	clay.UpdateScrollContainers(false, {input.wheel_x, input.wheel_y}, frame_dt)
-	scroll_after_wheel(restore)
+	scroll_after_wheel()
 	clay.BeginLayout()
 }
 
 end_layout :: proc() -> clay.ClayArray(clay.RenderCommand) {
 	cmds := clay.EndLayout(frame_dt)
-	last_cmd_count = int(cmds.length)
+	s_perf.cmds = int(cmds.length)
 	if s_cursor_want != s_cursor_set {
 		s_cursor_set = s_cursor_want
 		switch s_cursor_set {
@@ -379,7 +352,7 @@ end_draw :: proc() {
 		// poll in `frame` would eat raylib's key-press edges.
 		swap_start := time.now()
 		rl.SwapScreenBuffer()
-	} else when ODIN_OS == .Linux {
+	} else {
 		swap_start := time.now()
 		if wayland_active() {
 			// Same reason as macOS: `frame` polls after the wait.
@@ -388,9 +361,6 @@ end_draw :: proc() {
 		} else {
 			rl.EndDrawing()
 		}
-	} else {
-		swap_start := time.now()
-		rl.EndDrawing()
 	}
 	busy_dt = f32(time.duration_seconds(busy + time.since(swap_start)))
 	perf_frame_end()
@@ -419,10 +389,6 @@ element_box :: proc(id: string, index: u32 = 0) -> (clay.BoundingBox, bool) {
 	return data.boundingBox, true
 }
 
-region :: proc(id: string, index: u32 = 0) -> (clay.BoundingBox, bool) {
-	return element_box(id, index)
-}
-
 // Clip what the host draws next, ui.draw_* and rl.* alike, to element `id`.
 begin_clip :: proc(id: string, index: u32 = 0) -> bool {
 	box, ok := element_box(id, index)
@@ -437,44 +403,9 @@ end_clip :: proc() {
 	end_scissor()
 }
 
-element_hovered :: proc(id: string, index: u32 = 0) -> bool {
-	return clay.PointerOver(clay.ID(id, index))
-}
-
-@(private)
-s_interactions_enabled := true
-
-set_interactions_enabled :: proc(enabled: bool) {
-	s_interactions_enabled = enabled
-}
-
 // A press over the element this frame. Hit-tested by Clay like `hovered`, so
 // a click on an open menu doesn't also land on what's under it, and a
 // control scrolled out of its container's clip can't be clicked.
 clicked :: proc(id: string, index: u32 = 0) -> bool {
-	return s_interactions_enabled && mouse_pressed(.Left) && element_hovered(id, index)
-}
-
-Stats :: struct {
-	fps:        i32,
-	frame_ms:   f32,
-	busy_ms:    f32,
-	clay_kb:    int,
-	cmds:       int,
-	custom:     int,
-	custom_max: int,
-	zoom:       f32,
-}
-
-stats :: proc() -> Stats {
-	return {
-		fps        = shown_fps,
-		frame_ms   = frame_dt * 1000,
-		busy_ms    = busy_dt * 1000,
-		clay_kb    = (len(clay_memory) + 1023) / 1024,
-		cmds       = last_cmd_count,
-		custom     = len(s_custom),
-		custom_max = CUSTOM_RESERVE,
-		zoom       = zoom,
-	}
+	return mouse_pressed(.Left) && hovered(id, index)
 }

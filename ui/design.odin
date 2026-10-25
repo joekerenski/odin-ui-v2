@@ -65,16 +65,6 @@ default_design :: proc(allocator := context.allocator) -> Design {
 	}
 }
 
-design_clone :: proc(d: Design, allocator := context.allocator) -> Design {
-	out := d
-	out.name = strings.clone(d.name, allocator)
-	out.dir = strings.clone(d.dir, allocator)
-	for &f in out.fonts {
-		f = strings.clone(f, allocator)
-	}
-	return out
-}
-
 design_destroy :: proc(d: ^Design, allocator := context.allocator) {
 	delete(d.name, allocator)
 	delete(d.dir, allocator)

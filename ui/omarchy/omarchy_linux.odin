@@ -12,7 +12,6 @@ package omarchy
 
 import ui ".."
 import "core:os"
-import "core:strconv"
 import "core:strings"
 import "core:time"
 
@@ -92,43 +91,32 @@ parse_colors :: proc(text: string) -> (b: ui.Theme_Base, ok: bool) {
 		case "mode":
 			b.mode = .Light if val == "light" else .Dark
 		case "background":
-			b.background = hex(val)
+			b.background = color(val)
 		case "foreground":
-			b.foreground = hex(val)
+			b.foreground = color(val)
 		case "accent":
-			b.accent = hex(val)
+			b.accent = color(val)
 		case "selection":
-			b.surface = hex(val)
+			b.surface = color(val)
 		case "muted":
-			b.border = hex(val)
+			b.border = color(val)
 		case "yellow":
-			b.warning = hex(val)
+			b.warning = color(val)
 		case "red":
-			b.danger = hex(val)
+			b.danger = color(val)
 		case "green":
-			b.success = hex(val)
+			b.success = color(val)
 		}
 	}
 	ok = b.background.a > 0 && b.foreground.a > 0 && b.accent.a > 0
 	return
 }
 
-// "#rrggbb" or "#rrggbbaa"; anything else is alpha 0, which the base reads
-// as "derive it".
+// A color, or alpha 0 (which the base reads as "derive it") when it isn't one.
 @(private)
-hex :: proc(s: string) -> ui.Color {
-	s := strings.trim_prefix(s, "#")
-	if len(s) != 6 && len(s) != 8 {
-		return {}
-	}
-	v, ok := strconv.parse_u64_of_base(s, 16)
-	if !ok {
-		return {}
-	}
-	if len(s) == 6 {
-		v = v << 8 | 0xff
-	}
-	return {f32(v >> 24 & 0xff), f32(v >> 16 & 0xff), f32(v >> 8 & 0xff), f32(v & 0xff)}
+color :: proc(s: string) -> ui.Color {
+	c, _ := ui.parse_hex(s)
+	return c
 }
 
 // "catppuccin-latte" -> "Catppuccin Latte", like `omarchy theme current`.

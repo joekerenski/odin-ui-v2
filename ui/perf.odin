@@ -3,14 +3,13 @@ package ui
 import clay "../deps/clay"
 import rlgl "../deps/raylib/rlgl"
 import "core:fmt"
-import "core:math"
 import "core:slice"
 import "core:time"
 import gl "vendor:OpenGL"
 
 // Frame timing, measured by the frame loop itself: the app adds nothing. A
 // frame is split at the calls it already makes, against a budget of 120 fps
-// on any display (perf_budget_fps), where the CPU and the GPU each get 8.33 ms
+// on any display (PERF_BUDGET_MS), where the CPU and the GPU each get 8.33 ms
 // (they work side by side). F3 shows the debug strip: the last 120 frames'
 // average and worst of each part, colored against the budget.
 //
@@ -47,13 +46,9 @@ PERF_BUDGETED :: bit_set[Perf_Part]{.CPU, .GPU}
 // Frames the strip averages over.
 PERF_WINDOW :: 120
 
-// The rate the budget is for. 120 whatever the display: a 60 Hz screen hides
-// a frame that would miss on a 120 Hz one.
-perf_budget_fps: f32 = 120
-
-perf_budget_ms :: proc() -> f32 {
-	return 1000 / perf_budget_fps
-}
+// The budget: a frame at DEFAULT_FPS (120), whatever the display, since a
+// 60 Hz screen hides a frame that would miss on a 120 Hz one.
+PERF_BUDGET_MS :: 1000.0 / DEFAULT_FPS
 
 // Average and worst of the last PERF_WINDOW frames, in ms.
 Perf_Stats :: struct {
@@ -100,9 +95,9 @@ perf_bench_frames :: proc() -> int {
 // GPU p99 is over the budget.
 perf_report :: proc(title: string) -> (ok: bool) {
 	ok = true
-	budget := perf_budget_ms()
+	budget := f32(PERF_BUDGET_MS)
 	recorded := len(s_perf.all[.CPU])
-	fmt.printfln("%s: %d frames after %d warmup, budget %.2f ms (%.0f fps)", title, recorded, s_perf.bench_warmup, budget, perf_budget_fps)
+	fmt.printfln("%s: %d frames after %d warmup, budget %.2f ms (%d fps)", title, recorded, s_perf.bench_warmup, budget, DEFAULT_FPS)
 	for p in Perf_Part {
 		v := s_perf.all[p][:]
 		if len(v) == 0 {
@@ -132,11 +127,6 @@ perf_report :: proc(title: string) -> (ok: bool) {
 @(private)
 debug_strip_on := true
 
-// Show or hide the debug strip (F3 toggles it too).
-show_debug_strip :: proc(on: bool) {
-	debug_strip_on = on
-}
-
 // The timing and the UI's counts, floating in the top right. Call while
 // building the UI, every frame; F3 toggles it.
 debug_strip :: proc() {
@@ -148,7 +138,6 @@ debug_strip :: proc() {
 		return
 	}
 	ps := perf_stats()
-	st := stats()
 	t := theme
 	if clay.UI(clay.ID("UiDebug"))(clay.ElementDeclaration{
 		layout = {
@@ -171,8 +160,9 @@ debug_strip :: proc() {
 		line :: proc(s: string, color: Color) {
 			text(s, theme.font_mono, theme.size_small, color)
 		}
-		budget := perf_budget_ms()
-		line(fmt.tprintf("%d fps   budget %.2f ms (%.0f fps)", st.fps, budget, perf_budget_fps), t.text_dim)
+		budget := f32(PERF_BUDGET_MS)
+		fps := 1000 / ps.avg[.Frame] if ps.avg[.Frame] > 0 else 0
+		line(fmt.tprintf("%.0f fps   budget %.2f ms (%d fps)", fps, budget, DEFAULT_FPS), t.text_dim)
 		for p in Perf_Part {
 			if p == .GPU && !ps.gpu {
 				continue
@@ -189,8 +179,8 @@ debug_strip :: proc() {
 			}
 			line(fmt.tprintf("%-6v avg %s  max %s", p, perf_ms(ps.avg[p], 2), perf_ms(ps.worst[p], 2)), color)
 		}
-		line(fmt.tprintf("clay %d KB  %d cmds  custom %d/%d", st.clay_kb, st.cmds, st.custom, st.custom_max), t.text_dim)
-		line(fmt.tprintf("zoom %d%%   F3 hide", int(math.round(st.zoom * 100))), t.text_dim)
+		line(fmt.tprintf("clay %d KB  %d cmds  custom %d/%d", (len(clay_memory) + 1023) / 1024, s_perf.cmds, len(s_custom), CUSTOM_RESERVE), t.text_dim)
+		line(fmt.tprintf("zoom %.0f%%   F3 hide", zoom * 100), t.text_dim)
 	}
 }
 
@@ -222,6 +212,7 @@ s_perf: struct {
 	bench_warmup: int,
 	bench_frames: int,
 	all:          [Perf_Part][dynamic]f32,
+	cmds:         int, // Clay's render commands last frame, for the strip
 	// Where the parts start.
 	t_ready:      time.Tick, // the frame wait ended
 	t_layout:     time.Tick,

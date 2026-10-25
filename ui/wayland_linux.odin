@@ -1,3 +1,4 @@
+#+private
 package ui
 
 // Wayland extras on top of raylib/GLFW, active when GLFW picked its Wayland

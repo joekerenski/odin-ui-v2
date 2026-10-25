@@ -35,8 +35,6 @@ Palette :: struct {
 	warning:        Color,
 	danger:         Color,
 	success:        Color,
-	canvas:         Color, // host drawing areas (the graph)
-	scrim:          Color, // translucent floating chrome (the debug strip)
 }
 
 Metrics :: struct {
@@ -93,27 +91,7 @@ Theme :: struct {
 	motion:           Motion,
 }
 
-// Dark "lab console" defaults, same family as gravsim. What `theme` holds
-// before a design is applied, and the fallback status colors.
-PALETTE_DARK :: Palette {
-	bg             = {10, 12, 20, 255},
-	panel          = {18, 22, 34, 255},
-	surface        = {38, 44, 62, 255},
-	surface_hot    = {52, 58, 76, 255},
-	border         = {40, 46, 66, 255},
-	text           = {220, 226, 240, 255},
-	text_dim       = {130, 140, 165, 255},
-	text_on_accent = {10, 14, 26, 255},
-	accent         = {110, 170, 255, 255},
-	accent_hot     = {140, 190, 255, 255},
-	warning        = {255, 190, 90, 255},
-	danger         = {255, 110, 110, 255},
-	success        = {110, 210, 150, 255},
-	canvas         = {8, 10, 16, 255},
-	scrim          = {12, 16, 28, 210},
-}
-
-// The same look as a base, for designs: palette_from_base(BASE_DARK).
+// The default dark look, and the status colors a dark theme falls back on.
 BASE_DARK :: Theme_Base {
 	mode       = .Dark,
 	background = {10, 12, 20, 255},
@@ -173,8 +151,9 @@ MOTION_DEFAULT :: Motion {
 	press  = 0.25,
 }
 
+// The palette is BASE_DARK's from init on (palette_from_base can't run before
+// main); apps then apply a design.
 theme := Theme {
-	palette    = PALETTE_DARK,
 	metrics    = METRICS_DEFAULT,
 	typography = TYPOGRAPHY_DEFAULT,
 	motion     = MOTION_DEFAULT,
@@ -249,9 +228,6 @@ palette_from_base :: proc(b: Theme_Base) -> Palette {
 	p.warning = b.warning if b.warning.a > 0 else fall.warning
 	p.danger = b.danger if b.danger.a > 0 else fall.danger
 	p.success = b.success if b.success.a > 0 else fall.success
-	p.canvas = mix(bg, {0, 0, 0, 255}, 0.22) if dark else mix(bg, {255, 255, 255, 255}, 0.5)
-	p.scrim = p.panel
-	p.scrim.a = 215
 	return p
 }
 
@@ -265,13 +241,6 @@ set_palette :: proc(p: Palette, fade: f32 = 0) {
 		return
 	}
 	s_fade = {from = theme.palette, to = p, t = 0, duration = fade, active = true}
-}
-
-// Swap palette and metrics at once, no fade.
-set_theme :: proc(t: Theme) {
-	s_fade = {}
-	theme = t
-	reset_styles()
 }
 
 @(private)

@@ -207,7 +207,7 @@ graph_input :: proc(g: ^Graph, drag_id: ^int) {
 		}
 	}
 
-	canvas, canvas_ok := ui.region("Canvas")
+	canvas, canvas_ok := ui.element_box("Canvas")
 	world := [2]f32{}
 	if canvas_ok {
 		world = screen_to_world(canvas, ui.input.mouse_x, ui.input.mouse_y)
@@ -286,13 +286,15 @@ build_panel :: proc(g: ^Graph) {
 		ui.dim("N add   bksp delete   space pause   F fullscreen")
 		ui.panel_end("Panel")
 	}
-	ui.canvas_begin("Canvas", ui.Color{}) // transparent: the graph is drawn under the UI
-	ui.element_end()
+	// No fill: the graph is drawn under the UI.
+	if ui.row_begin("Canvas", {grow_h = true}) {
+		ui.element_end()
+	}
 }
 
 @(private)
 draw_graph :: proc(g: ^Graph) {
-	box, ok := ui.region("Canvas")
+	box, ok := ui.element_box("Canvas")
 	if !ok {
 		return
 	}

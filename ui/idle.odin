@@ -28,7 +28,7 @@ import "core:time"
 //
 // UI_IDLE_DEBUG=1 in the environment prints, every two seconds, how many ticks drew and why.
 //
-// Without idle_after, every tick draws, as before.
+// Without idle_after, every tick draws.
 
 IDLE_HEARTBEAT :: 1.0 // seconds
 
@@ -87,11 +87,6 @@ wake_in :: proc(seconds: f64) {
 // text). Declared each frame, while building the UI.
 hover_zone :: proc(r: clay.BoundingBox) {
 	append(&s_zones, r)
-}
-
-// Whether the last tick drew nothing (the app is idle). For a frame-rate readout.
-idling :: proc() -> bool {
-	return s_idle_skipped
 }
 
 // Called from begin_layout, after the pointer state is set: what the pointer is over in the

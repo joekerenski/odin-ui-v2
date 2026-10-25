@@ -104,9 +104,9 @@ rich_text :: proc(id: string, spans: []Span, opts := Rich_Opts{}) -> (res: Rich_
 			}
 		}
 	}
-	if laid && s_interactions_enabled {
+	if laid {
 		local := [2]f32{input.mouse_x - box.x, input.mouse_y - box.y}
-		over := element_hovered(id)
+		over := hovered(id)
 		link := link_at(r, local) if over else 0
 		if link != 0 {
 			res.hovered = link
@@ -153,10 +153,6 @@ rich_selection :: proc() -> string {
 		if s < e { strings.write_string(&b, r.text[s:e]) }
 	}
 	return strings.to_string(b)
-}
-
-rich_select_none :: proc() {
-	s_sel = {}
 }
 
 // A drag selection is under way (the host can scroll its view when the pointer nears an edge).

@@ -1,3 +1,4 @@
+#+private
 package ui
 
 // macOS extras on top of raylib/GLFW:
@@ -75,7 +76,6 @@ Mach_Timebase :: struct {
 
 BLOCK_IS_GLOBAL :: 1 << 28
 
-@(private)
 Input_Monitor_Block :: struct {
 	isa:        rawptr,
 	flags:      c.int,
@@ -84,23 +84,15 @@ Input_Monitor_Block :: struct {
 	descriptor: rawptr,
 }
 
-@(private)
 s_monitor_block: Input_Monitor_Block
-@(private)
 s_monitor_token: rawptr
-@(private)
 s_monitor_active: bool
 
-@(private)
 s_ev_x, s_ev_y, s_ev_dx, s_ev_dy, s_ev_wheel_x, s_ev_wheel_y: f32
-@(private)
 s_ev_down, s_ev_pressed, s_ev_released: u8
-@(private)
 s_key_down, s_key_pressed: bit_set[Key]
-@(private)
 s_key_mods: bit_set[Mod]
 
-@(private)
 s_key_repeat: bit_set[Key]
 
 EV_LEFT_DOWN, EV_LEFT_UP :: 1, 2
@@ -111,7 +103,6 @@ EV_KEY_DOWN, EV_KEY_UP, EV_FLAGS_CHANGED :: 10, 11, 12
 EV_SCROLL_WHEEL :: 22
 EV_OTHER_DOWN, EV_OTHER_UP, EV_OTHER_DRAGGED :: 25, 26, 27
 
-@(private)
 input_monitor_invoke :: proc "c" (block: rawptr, event: rawptr) -> rawptr {
 	context = runtime.default_context()
 	obj := cast(^Foundation.Object)event
@@ -161,7 +152,6 @@ input_monitor_invoke :: proc "c" (block: rawptr, event: rawptr) -> rawptr {
 	return event
 }
 
-@(private)
 mods_from_flags :: proc(flags: uint) -> (mods: bit_set[Mod]) {
 	if flags & (1 << 17) != 0 do mods += {.Shift}
 	if flags & (1 << 18) != 0 do mods += {.Ctrl}
@@ -170,7 +160,6 @@ mods_from_flags :: proc(flags: uint) -> (mods: bit_set[Mod]) {
 	return
 }
 
-@(private)
 key_from_event :: proc(obj: ^Foundation.Object) -> Key {
 	if k := key_from_code(intrinsics.objc_send(u16, obj, "keyCode")); k != .Unknown {
 		return k
@@ -181,7 +170,6 @@ key_from_event :: proc(obj: ^Foundation.Object) -> Key {
 // +, - and 0 by the character they type (Shift applies, other modifiers do
 // not), since their key codes are US positions: on a German layout + sits
 // where US has ].
-@(private)
 key_from_chars :: proc(obj: ^Foundation.Object) -> Key {
 	chars := intrinsics.objc_send(^Foundation.Object, obj, "charactersIgnoringModifiers")
 	if chars == nil {
@@ -203,7 +191,6 @@ key_from_chars :: proc(obj: ^Foundation.Object) -> Key {
 }
 
 // kVK_* virtual key codes: physical positions on an ANSI layout, as GLFW uses.
-@(private)
 key_from_code :: proc(code: u16) -> Key {
 	switch code {
 	case 0x35: return .Escape
@@ -261,7 +248,6 @@ key_from_code :: proc(code: u16) -> Key {
 // title bar, fullscreen and any window size come out right. An event for no
 // window (or another one) reports screen or foreign-window coordinates, so it
 // goes through the screen into ours.
-@(private)
 mouse_pos_from_event :: proc(obj: ^Foundation.Object) {
 	win := cast(^Foundation.Object)rl.GetWindowHandle()
 	if win == nil {
@@ -285,7 +271,6 @@ mouse_pos_from_event :: proc(obj: ^Foundation.Object) {
 	s_ev_y = f32(bounds.size.height - (p.y - bounds.origin.y))
 }
 
-@(private)
 install_input_monitor :: proc() {
 	if s_monitor_active {
 		return
@@ -309,7 +294,6 @@ install_input_monitor :: proc() {
 	s_monitor_active = s_monitor_token != nil
 }
 
-@(private)
 shutdown_input_monitor :: proc() {
 	if !s_monitor_active {
 		return
@@ -380,44 +364,25 @@ darwin_is_fullscreen :: proc() -> bool {
 
 // --- display link -----------------------------------------------------------
 
-@(private)
 link_obj: ^Foundation.Object
-@(private)
 link_thread: ^thread.Thread
-@(private)
 link_loop: rawptr
-@(private)
 link_ready: rawptr
-@(private)
 link_sem: rawptr
-@(private)
 link_gen: i64
-@(private)
 link_target: u64 // f64 bits: targetTimestamp of the latest tick, host seconds
-@(private)
 link_period: u64 // f64 bits: targetTimestamp - timestamp
-@(private)
 link_screen: ^Foundation.Screen
-@(private)
 pace_mark: i64
-@(private)
 pace_started: bool
-@(private)
 last_target: f64
-@(private)
 timebase: Mach_Timebase
-@(private)
 screen_adaptive: bool
-@(private)
 screen_min_interval: f64
-@(private)
 deadline_mode: bool
-@(private)
 present_at: u64
-@(private)
 work_peak: f64
 
-@(private)
 link_tick :: proc "c" (self: rawptr, cmd: rawptr, link: ^Foundation.Object) {
 	ts := intrinsics.objc_send(f64, link, "timestamp")
 	target := intrinsics.objc_send(f64, link, "targetTimestamp")
@@ -428,7 +393,6 @@ link_tick :: proc "c" (self: rawptr, cmd: rawptr, link: ^Foundation.Object) {
 }
 
 // Adds the link to this thread's run loop and runs it until darwin_stop.
-@(private)
 link_thread_proc :: proc() {
 	Foundation.scoped_autoreleasepool()
 	cls := cast(^Foundation.Object)Foundation.objc_lookUpClass("NSRunLoop")
@@ -440,7 +404,6 @@ link_thread_proc :: proc() {
 	intrinsics.objc_send(nil, link_obj, "invalidate")
 }
 
-@(private)
 link_target_class :: proc() -> Foundation.Class {
 	name :: "UIFrameLinkTarget"
 	if cls := Foundation.objc_lookUpClass(name); cls != nil {
@@ -456,7 +419,6 @@ link_target_class :: proc() -> Foundation.Class {
 }
 
 // The view's link follows the window between screens on its own.
-@(private)
 start_link :: proc() {
 	win := cast(^Foundation.Window)rl.GetWindowHandle()
 	if win == nil {
@@ -484,7 +446,6 @@ start_link :: proc() {
 	dispatch_semaphore_wait(link_ready, ~u64(0))
 }
 
-@(private)
 stop_link :: proc() {
 	if link_obj == nil {
 		return
@@ -501,7 +462,6 @@ stop_link :: proc() {
 // minimumRefreshInterval < maximumRefreshInterval means the panel can hold a
 // frame for longer than one refresh: ProMotion, or adaptive sync. macOS 12+.
 // Re-read whenever the window lands on another screen.
-@(private)
 read_screen_refresh :: proc() {
 	win := cast(^Foundation.Window)rl.GetWindowHandle()
 	if win == nil {
@@ -536,7 +496,6 @@ darwin_stop :: proc() {
 	stop_link()
 }
 
-@(private)
 host_seconds :: proc(delta: u64) -> f64 {
 	if timebase.denom == 0 {
 		return 0
@@ -544,7 +503,6 @@ host_seconds :: proc(delta: u64) -> f64 {
 	return f64(delta) * f64(timebase.numer) / f64(timebase.denom) / 1e9
 }
 
-@(private)
 seconds_to_host :: proc(s: f64) -> u64 {
 	if timebase.numer == 0 {
 		return 0
@@ -553,7 +511,6 @@ seconds_to_host :: proc(s: f64) -> u64 {
 }
 
 // Link ticks per frame: 1 when following the display, 2 for 60 on 120 Hz.
-@(private)
 vblank_step :: proc() -> i64 {
 	period := transmute(f64)intrinsics.atomic_load(&link_period)
 	if period <= 0 || target_fps <= 0 {
@@ -563,7 +520,6 @@ vblank_step :: proc() -> i64 {
 }
 
 // One frame on the deadline grid: the target rate, or the panel's fastest.
-@(private)
 deadline_period :: proc() -> u64 {
 	s := screen_min_interval
 	if target_fps > 0 && 1.0 / f64(target_fps) > s {
@@ -578,7 +534,6 @@ deadline_period :: proc() -> u64 {
 // Time-constrained scheduling: wakes on the deadline instead of ~1ms after
 // it. The budget is half a period; a frame that runs longer gets demoted by
 // the kernel for a while, which only costs precision.
-@(private)
 set_realtime :: proc(on: bool) {
 	thread := pthread_mach_thread_np(pthread_self())
 	if on {

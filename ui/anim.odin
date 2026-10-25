@@ -80,23 +80,27 @@ finite :: proc(f: f32) -> bool {
 	return !math.is_nan(f) && !math.is_inf(f)
 }
 
-// Called by `frame`: a new frame stamp, and values nobody asked for during
-// the last frame are dropped.
+// Called by `frame`: a new frame stamp, and the per-widget tables (springs,
+// scrolls, color pickers) drop what nobody asked for during the last frame.
 @(private)
 anim_tick :: proc() {
 	s_frame += 1
-	stale := make([dynamic]u64, context.temp_allocator)
-	for key, a in s_anims {
-		if a.seen + 1 < s_frame {
+	drop_stale(&s_anims)
+	drop_stale(&s_scrolls)
+	drop_stale(&s_pickers)
+}
+
+@(private)
+drop_stale :: proc(m: ^map[$K]$V) {
+	stale := make([dynamic]K, context.temp_allocator)
+	for key, v in m {
+		if v.seen + 1 < s_frame {
 			append(&stale, key)
 		}
 	}
 	for key in stale {
-		delete_key(&s_anims, key)
+		delete_key(m, key)
 	}
-	scroll_tick()
-	picker_tick()
-	edit_tick()
 }
 
 @(private)
@@ -121,6 +125,7 @@ Scroll :: struct {
 	id:       clay.ElementId,
 	target:   f32,
 	velocity: f32,
+	shown:    f32, // where it was before Clay applied this frame's wheel
 	seen:     u64,
 }
 
@@ -215,47 +220,28 @@ scroll_at_end :: proc(id: string, slack: f32 = 4) -> bool {
 	return y >= end - slack
 }
 
-@(private)
-scroll_tick :: proc() {
-	stale := make([dynamic]u32, context.temp_allocator)
-	for key, s in s_scrolls {
-		if s.seen + 1 < s_frame {
-			append(&stale, key)
-		}
-	}
-	for key in stale {
-		delete_key(&s_scrolls, key)
-	}
-}
-
 // begin_layout wraps Clay's wheel handling in these two.
 @(private)
-scroll_before_wheel :: proc() -> (restore: [dynamic]f32) {
-	restore = make([dynamic]f32, context.temp_allocator)
-	for _, s in s_scrolls {
+scroll_before_wheel :: proc() {
+	for _, &s in s_scrolls {
 		data := clay.GetScrollContainerData(s.id)
 		if data.found {
-			append(&restore, data.scrollPosition.y)
+			s.shown = data.scrollPosition.y
 			data.scrollPosition.y = s.target
-		} else {
-			append(&restore, 0)
 		}
 	}
-	return
 }
 
 @(private)
-scroll_after_wheel :: proc(restore: [dynamic]f32) {
-	i := 0
+scroll_after_wheel :: proc() {
 	for _, &s in s_scrolls {
-		defer i += 1
 		data := clay.GetScrollContainerData(s.id)
-		if !data.found || i >= len(restore) {
+		if !data.found {
 			continue
 		}
 		max_scroll := max(0, data.contentDimensions.height - data.scrollContainerDimensions.height)
 		s.target = math.clamp(data.scrollPosition.y, -max_scroll, 0)
-		y := restore[i]
+		y := s.shown
 		spring_step(&y, &s.velocity, s.target, theme.motion.scroll, 0, frame_dt)
 		data.scrollPosition.y = math.clamp(y, -max_scroll, 0)
 	}

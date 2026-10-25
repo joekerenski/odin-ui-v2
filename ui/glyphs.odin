@@ -93,8 +93,7 @@ glyph_advance_px :: proc(face: Face_Id, glyph: u32, px: f32) -> f32 {
 
 @(private)
 Fallback :: struct {
-	path:  string, // "" when added from data
-	data:  []u8,
+	path:  string,
 	face:  Face_Id,
 	tried: bool,
 }
@@ -109,10 +108,6 @@ s_system_fallbacks_added: bool
 // before the system's. Loaded the first time it's needed.
 add_fallback_font :: proc(path: string) {
 	append(&s_fallbacks, Fallback{path = strings.clone(path), face = NO_FACE})
-}
-
-add_fallback_font_data :: proc(data: []u8) {
-	append(&s_fallbacks, Fallback{data = data, face = NO_FACE})
 }
 
 // Fonts most systems have: math, Greek and arrows (STIX, sized like text), other symbols, then
@@ -148,11 +143,7 @@ resolve_glyph :: proc(primary: Face_Id, r: rune) -> (face: Face_Id, glyph: u32) 
 	for &fb in s_fallbacks {
 		if !fb.tried {
 			fb.tried = true
-			if fb.path != "" {
-				if os.is_file(fb.path) { fb.face = face_from_path(fb.path) }
-			} else {
-				fb.face = face_from_data(fb.data)
-			}
+			if os.is_file(fb.path) { fb.face = face_from_path(fb.path) }
 		}
 		if fb.face == NO_FACE || fb.face == primary { continue }
 		if g := face_glyph(fb.face, r); g != 0 {

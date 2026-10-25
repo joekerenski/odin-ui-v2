@@ -84,7 +84,7 @@ Against the triangle-fan renderer this replaced (raylib's batch, with 4× multis
 | triangle fans, MSAA 4× | 1.02 / 2.51 ms | 2.15 / 3.10 ms |
 | shapes and glyphs | 0.64 / 1.21 ms | 2.05 / 4.08 ms |
 
-Hosts draw with `ui.draw_rect`, `draw_rect_lines`, `draw_circle`, `draw_ring`, `draw_line`, `draw_triangle` and `draw_gradient_pill`, in layout units. raylib's own `rl.*` drawing still works but is a separate batch: call `ui.flush_shapes()` before an `rl.*` call that must land on top of `ui.draw_*` output. A Custom element's draw proc gets a flush before it runs.
+Hosts draw with `ui.draw_circle`, `draw_ring`, `draw_line`, `draw_triangle` and `draw_gradient_pill`, in layout units. raylib's own `rl.*` drawing still works but is a separate batch: call `ui.flush_shapes()` before an `rl.*` call that must land on top of `ui.draw_*` output. A Custom element's draw proc gets a flush before it runs.
 
 The renderer applies a clip only when something draws, and only when it differs from the one in effect. Every clipped floating element (a slider knob, a segment label) arrives as its own Clay root with its own scissor start and end, almost always with the same box.
 
@@ -102,7 +102,7 @@ The demo app follows Omarchy when it is installed, the macOS appearance on a Mac
 
 ## Frame timing
 
-The frame loop times itself, with nothing for the app to add ([ui/perf.odin](ui/perf.odin)), against a budget of 120 fps on any display (`ui.perf_budget_fps`): the CPU and the GPU each get 8.33 ms, since they work side by side. A 60 Hz screen would hide a frame that misses on a 120 Hz one.
+The frame loop times itself, with nothing for the app to add ([ui/perf.odin](ui/perf.odin)), against a budget of 120 fps on any display (`ui.PERF_BUDGET_MS`): the CPU and the GPU each get 8.33 ms, since they work side by side. A 60 Hz screen would hide a frame that misses on a 120 Hz one.
 
 | Part | From, to |
 | --- | --- |

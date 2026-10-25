@@ -74,10 +74,6 @@ key_pressed :: proc(k: Key) -> bool {
 	return k in input.keys_pressed
 }
 
-key_down :: proc(k: Key) -> bool {
-	return k in input.keys_down
-}
-
 // Pressed this frame or auto-repeating: for keys that should keep acting
 // while held.
 key_repeat :: proc(k: Key) -> bool {

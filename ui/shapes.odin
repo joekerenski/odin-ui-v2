@@ -558,16 +558,6 @@ snap_width :: proc(w: f32) -> f32 {
 //
 // In layout units, like everything else. They batch; see flush_shapes.
 
-// A filled box, its corners rounded by `radius`.
-draw_rect :: proc(b: Region_Box, color: Color, radius: f32 = 0) {
-	push_box(b, {radius, radius, radius, radius}, color, color, exact = false)
-}
-
-// A box's outline, `width` thick, inside the box.
-draw_rect_lines :: proc(b: Region_Box, width: f32, color: Color, radius: f32 = 0) {
-	push_box(b, {radius, radius, radius, radius}, color, color, inset = {width, width, width, width}, exact = false)
-}
-
 draw_circle :: proc(x, y, r: f32, color: Color) {
 	push_box({x - r, y - r, 2 * r, 2 * r}, {r, r, r, r}, color, color, exact = false)
 }

@@ -192,7 +192,7 @@ text_edit :: proc(id: string, e: ^Text_Edit, opts: Edit_Opts = {}) -> (res: Edit
 	ed.wrap_w = vp.width if vp_ok else 0
 	relayout(&ed)
 
-	hot := s_interactions_enabled && hovered(id)
+	hot := hovered(id)
 	if hot {
 		request_cursor(.Text)
 	}
