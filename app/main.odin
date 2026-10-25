@@ -11,6 +11,8 @@ package main
 //   ./run.sh --lab            start on the Design tab
 //   ./run.sh --design=soft    start with designs/soft.toml (default: console)
 //   ./run.sh --theme=light    start with colors: omarchy, system, dark, or light
+//   ./run.sh --bench          a scripted session, then the frame timing report
+//                             (bench.odin); exits 1 when over the 120 fps budget
 //   ./run.sh --raylib-log     print raylib's full log (default: errors only)
 //
 // Drag a node to pin it under the cursor. Link is a mode: the next node you
@@ -36,7 +38,13 @@ Tab :: enum {
 TAB_LABELS := []string{"Graph", "Showcase", "Design"}
 
 main :: proc() {
+	// Runs last, after the deferred shutdown.
+	bench_failed := false
+	defer if bench_failed {
+		os.exit(1)
+	}
 	shot := false
+	bench := false
 	raylib_log := false
 	tab := Tab.Graph
 	start_theme: Maybe(Theme_Source)
@@ -49,6 +57,8 @@ main :: proc() {
 		switch a {
 		case "--shot":
 			shot = true
+		case "--bench":
+			bench = true
 		case "--raylib-log":
 			raylib_log = true
 		case "--showcase":
@@ -78,7 +88,6 @@ main :: proc() {
 		height     = 780,
 		resizable  = true,
 		high_dpi   = true,
-		target_fps = 60,
 		min_width  = 720,
 		min_height = 480,
 		raylib_log = raylib_log,
@@ -102,10 +111,17 @@ main :: proc() {
 
 	drag_id := -1
 	frame_n := 0
+	if bench {
+		ui.perf_bench_start(BENCH_WARMUP)
+	}
 
 	for ui.frame() {
 		free_all(context.temp_allocator)
 		frame_n += 1
+		if bench && bench_step(ui.perf_bench_frames(), &tab) {
+			bench_failed = !ui.perf_report("odin-ui bench")
+			break
+		}
 
 		// While a text field has the keyboard, keys are typing: Escape
 		// leaves the field instead of quitting, and F is just an F.

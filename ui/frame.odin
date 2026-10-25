@@ -47,7 +47,7 @@ Window_Desc :: struct {
 	resizable:  bool,
 	high_dpi:   bool,
 	msaa_4x:    bool, // only for a host's own rl.* shapes: the UI smooths its edges itself
-	target_fps: i32, // 0 = the display's refresh
+	target_fps: i32, // 0 = DEFAULT_FPS (120), up to the display's rate; -1 = the display's rate
 	// Smallest window, in points. Zooming in also stops where the layout
 	// would get smaller than this.
 	min_width:  i32,
@@ -100,8 +100,13 @@ shapes_tex: rl.Texture2D
 @(private)
 loaded_scale: f32
 
+// The frame rate unless a Window_Desc says otherwise. A slower display runs
+// at its own rate; a faster one is held to this.
+DEFAULT_FPS :: 120
+
 init :: proc(desc: Window_Desc) {
-	target_fps = desc.target_fps
+	// Inside, 0 means the display's rate.
+	target_fps = desc.target_fps if desc.target_fps > 0 else (DEFAULT_FPS if desc.target_fps == 0 else 0)
 	quit_requested = false
 	s_idle_after = desc.idle_after
 	s_idle_skipped = false
@@ -145,7 +150,7 @@ init :: proc(desc: Window_Desc) {
 	zoom, pending_zoom = 1, 1
 	screen_w = f32(rl.GetScreenWidth())
 	screen_h = f32(rl.GetScreenHeight())
-	frame_dt = 1.0 / 60.0
+	frame_dt = 1.0 / DEFAULT_FPS
 	loaded_scale = raster_scale()
 
 	input = {}
@@ -154,6 +159,7 @@ init :: proc(desc: Window_Desc) {
 	reset_styles()
 	custom_setup()
 	shapes_setup()
+	perf_setup()
 }
 
 shutdown :: proc() {
@@ -170,6 +176,7 @@ shutdown :: proc() {
 	glyphs_teardown()
 	custom_teardown()
 	shapes_teardown()
+	perf_teardown()
 	idle_teardown()
 	anim_teardown()
 	design_teardown()
@@ -223,6 +230,7 @@ frame :: proc() -> bool {
 		fps_frames = 0
 	}
 
+	perf_mark_ready()
 	return true
 }
 
@@ -249,17 +257,18 @@ frame_wait :: proc() {
 }
 
 // raylib's own loop (X11, Windows): EndDrawing waits and polls; an idle tick, which doesn't
-// draw, sleeps a 60 Hz tick and polls itself.
+// draw, sleeps one frame at the target rate and polls itself.
 @(private)
 raylib_wait :: proc() {
+	tick := 1.0 / f32(target_fps if target_fps > 0 else DEFAULT_FPS)
 	if s_idle_skipped {
-		time.sleep(time.Second / 60)
+		time.sleep(time.Duration(f64(tick) * f64(time.Second)))
 		rl.PollInputEvents()
-		frame_dt = 1.0 / 60.0
+		frame_dt = tick
 	} else {
 		frame_dt = rl.GetFrameTime()
 		if frame_dt <= 0 {
-			frame_dt = 1.0 / 60.0
+			frame_dt = tick
 		}
 	}
 	frame_start = time.now()
@@ -309,6 +318,7 @@ clay_setup :: proc(desc: Window_Desc) {
 }
 
 begin_layout :: proc() {
+	perf_layout_begin()
 	custom_begin_frame()
 	s_text_cache_age += 1
 	if s_text_cache_full || s_text_cache_age >= TEXT_CACHE_FRAMES {
@@ -339,6 +349,7 @@ end_layout :: proc() -> clay.ClayArray(clay.RenderCommand) {
 		}
 	}
 	s_cursor_want = .Arrow
+	perf_layout_end()
 	return cmds
 }
 
@@ -346,6 +357,7 @@ end_layout :: proc() -> clay.ClayArray(clay.RenderCommand) {
 // the zoom is a scale on rlgl's matrix stack.
 begin_draw :: proc() {
 	rl.BeginDrawing()
+	perf_draw_begin()
 	rl.ClearBackground(to_rl_color(theme.bg))
 	shapes_frame_begin()
 	rlgl.PushMatrix()
@@ -357,6 +369,7 @@ end_draw :: proc() {
 	flush_shapes()
 	rlgl.DrawRenderBatchActive()
 	rlgl.PopMatrix()
+	perf_draw_end()
 	busy := time.since(frame_start)
 	when ODIN_OS == .Darwin {
 		darwin_present_wait()
@@ -378,6 +391,7 @@ end_draw :: proc() {
 		rl.EndDrawing()
 	}
 	busy_dt = f32(time.duration_seconds(busy + time.since(swap_start)))
+	perf_frame_end()
 }
 
 // Write the back buffer to a PNG at framebuffer resolution. Call after

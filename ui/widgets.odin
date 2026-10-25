@@ -773,40 +773,6 @@ picker_tick :: proc() {
 	}
 }
 
-@(private)
-debug_strip_on := true
-
-debug_strip :: proc() {
-	if key_pressed(.F3) {
-		debug_strip_on = !debug_strip_on
-	}
-	if !debug_strip_on {
-		return
-	}
-	st := stats()
-	if clay.UI(clay.ID("UiDebug"))(clay.ElementDeclaration{
-		layout = {
-			sizing          = {width = clay.SizingFit({}), height = clay.SizingFit({})},
-			layoutDirection = .TopToBottom,
-			padding         = clay.PaddingAll(8),
-			childGap        = 1,
-		},
-		backgroundColor = theme.scrim,
-		cornerRadius    = clay.CornerRadiusAll(theme.radius_sm),
-		floating = {
-			attachTo           = .Root,
-			zIndex             = 3000,
-			pointerCaptureMode = .Passthrough,
-			attachment         = {element = .LeftBottom, parent = .LeftBottom},
-			offset             = {10, -10},
-		},
-	}) {
-		dim(fmt.tprintf("%d fps   busy %.2f / %.2f ms", st.fps, st.busy_ms, st.frame_ms))
-		dim(fmt.tprintf("clay %d KB   %d cmds   custom %d/%d", st.clay_kb, st.cmds, st.custom, st.custom_max))
-		dim(fmt.tprintf("zoom %d%%   F3 hide", int(math.round(st.zoom * 100))))
-	}
-}
-
 // Navigation tabs for a top bar: text labels, the selected one underlined in
 // the accent color. Items fit their label and fill the bar's height, so the
 // underline sits on the bar's bottom border; it slides to a new selection.

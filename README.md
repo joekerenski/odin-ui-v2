@@ -14,7 +14,7 @@ The font, raylib and GLFW are built into the binary, so `./graph` runs from any 
 
 Use Odin's [official release](https://github.com/odin-lang/Odin/releases) (built and tested with `dev-2026-09`). Text uses Odin's `vendor:stb/truetype`, whose library ships prebuilt for macOS and Windows; on Linux build it once with `make -C "$(odin root)/vendor/stb/src"`. Arch's `odin` package ships `vendor/` libraries as Git LFS pointer files, and Windows links raylib from the compiler.
 
-On the Graph tab: drag a node. **Link** then click another node to tie it to the selection. **N** adds a node, **delete** removes the selection, **space** pauses, **F** is fullscreen, **esc** quits. **F3** hides the timing strip. **Ctrl +/−/0** zooms the UI from 50% to 200% (**Cmd** on macOS); zooming in stops before the layout gets smaller than the 720×480 minimum window.
+On the Graph tab: drag a node. **Link** then click another node to tie it to the selection. **N** adds a node, **delete** removes the selection, **space** pauses, **F** is fullscreen, **esc** quits. **F3** hides the debug strip (frame timing, see [Frame timing](#frame-timing)). **Ctrl +/−/0** zooms the UI from 50% to 200% (**Cmd** on macOS); zooming in stops before the layout gets smaller than the 720×480 minimum window.
 
 ## macOS
 
@@ -22,7 +22,7 @@ Raylib on its own misses fast trackpad clicks, blurs fullscreen on Retina, and d
 
 - An `NSEvent` monitor records every mouse and key edge, then hands the event to GLFW unchanged. Raylib compares key state between polls, so a tap that starts and ends inside one frame never reads as pressed; the monitor keeps it.
 - Fullscreen is `[NSWindow toggleFullScreen:]`, so the 2x backing store stays. `ToggleFullscreen` is the path that drops the scale to 1x.
-- Swap interval stays off. The window view's display link (`NSView.displayLink`, macOS 14+) runs on its own thread; each tick bumps a counter and signals a semaphore, and the frame blocks until the counter has moved. `target_fps` 0 follows the display. A lower cap waits N ticks (60 on a 120 Hz panel is every second tick). The graph asks for 60.
+- Swap interval stays off. The window view's display link (`NSView.displayLink`, macOS 14+) runs on its own thread; each tick bumps a counter and signals a semaphore, and the frame blocks until the counter has moved. `target_fps` 0 is 120 (`ui.DEFAULT_FPS`): a 60 Hz display runs at 60, and a faster one is held to 120; -1 follows the display at any rate. A lower cap waits N ticks (60 on a 120 Hz panel is every second tick).
 - Input is polled after the wait, not right after the swap, so a frame draws input that is ~1 ms old instead of a frame old. On macOS `end_draw` swaps with `SwapScreenBuffer` instead of `EndDrawing`, which would poll a second time and eat raylib's key-press edges.
 - Fullscreen on an adaptive-refresh screen (ProMotion, adaptive sync) runs on a fixed deadline grid instead. The panel scans out directly and refreshes when a frame lands, which made `CVDisplayLink` report our own presents back (ticks 2–11 ms apart). The frame wakes just early enough for its recent peak work, polls, draws, flushes, sleeps to the deadline with `mach_wait_until`, then swaps. The thread is time-constrained in that mode; without it the wake is ~1 ms late and jittery. Swap-to-swap spread at 60 went from ~10 ms to 0.03 ms. Before macOS 14 there is no view link and the grid is the clock everywhere.
 
@@ -68,14 +68,21 @@ Once the probe shows the full refresh with the default stack, EGL vsync would wo
 
 Text is drawn from a glyph cache ([ui/glyphs.odin](ui/glyphs.odin)). Fonts are read with stb_truetype, and each glyph is rasterized the first time it is drawn, at `fontSize * dpi` pixels, into 1024² atlas pages. It is drawn with bilinear filtering and no mipmaps, snapped to the physical pixel grid; trilinear filtering is what softens raylib text. A character the font lacks comes from a fallback font, sized to the same em: ones added with `ui.add_fallback_font`, then system fonts (STIX for math, Greek and arrows, Apple Symbols, Arial Unicode, Hiragino for CJK on macOS; DejaVu and Noto on Linux). `ui.draw_glyph` draws by glyph id, for layouts that place glyphs themselves. There is no shaping: ligatures, Arabic and other scripts that need it draw character by character. Color emoji fonts aren't supported.
 
-Everything the UI draws goes through one shader, one quad per thing ([ui/shapes.odin](ui/shapes.odin)):
+Everything the UI draws goes through two small pipelines in one stream, one quad per thing ([ui/shapes.odin](ui/shapes.odin)):
 
 - **Shapes** are signed distance fields. The fragment shader works out how far each pixel is from the edge of a rounded box (each corner its own radius), a triangle, or a line, and fades the coverage over one physical pixel. Edges are smooth at any zoom without multisampling, and a large radius is as round as a small one.
 - **Borders** are the box minus the box inside its widths, so they follow the fill's curve exactly, with any width per side.
 - **Clay's rectangles and borders** snap to the physical pixel grid, so straight edges are crisp. Shapes a host draws do not snap, so they can move smoothly.
-- **Glyphs and images** are textured quads in the same stream.
+- **Glyphs and images** are textured quads of 36 bytes each, with a shader that only samples and tints. They are most of the quads, and the shapes' shader never sees them.
 
-A frame's quads go to the GPU in one upload, with a new draw call only where the clip or the texture changes. Interleaving with raylib's batch instead cost a buffer upload at every switch between text and shapes, and macOS's GL stalls on each one. On the demo's tabs, drawing takes 0.3–0.7 ms, against 1.5–2.6 ms for the triangle-fan renderer this replaced.
+A frame's quads go to the GPU in one upload per pipeline, with a new draw call only where the pipeline, the clip or the texture changes. Interleaving with raylib's batch instead cost a buffer upload at every switch between text and shapes, and macOS's GL stalls on each one.
+
+Against the triangle-fan renderer this replaced (raylib's batch, with 4× multisampling for smooth edges), over the same `--bench` session at 120 fps on an M5:
+
+| | Draw (CPU) avg / p99 | GPU avg / p99 |
+| --- | --- | --- |
+| triangle fans, MSAA 4× | 1.02 / 2.51 ms | 2.15 / 3.10 ms |
+| shapes and glyphs | 0.64 / 1.21 ms | 2.05 / 4.08 ms |
 
 Hosts draw with `ui.draw_rect`, `draw_rect_lines`, `draw_circle`, `draw_ring`, `draw_line`, `draw_triangle` and `draw_gradient_pill`, in layout units. raylib's own `rl.*` drawing still works but is a separate batch: call `ui.flush_shapes()` before an `rl.*` call that must land on top of `ui.draw_*` output. A Custom element's draw proc gets a flush before it runs.
 
@@ -92,6 +99,22 @@ A palette usually comes from a `Theme_Base`: mode, background, foreground, accen
 `ui/appearance` is the macOS counterpart. It reads AppKit's system colors under the app's effective appearance: window background, label text, separator, the accent picked in System Settings, and AppKit's white for text on the accent (4.0:1 on the default blue, which the 4.5:1 floor would otherwise turn black). Light/Dark and accent changes are noticed by re-reading the colors every 250 ms, since nothing in the loop receives the notification. `appearance.match_window` pins the title bar to a built-in palette's mode, or back to the system's with nil. Outside macOS it compiles to a no-op.
 
 The demo app follows Omarchy when it is installed, the macOS appearance on a Mac, and the design's dark colors otherwise. The Showcase's Theme card switches between the system theme and the design's dark and light colors, and `--theme=omarchy|system|dark|light` picks one at startup.
+
+## Frame timing
+
+The frame loop times itself, with nothing for the app to add ([ui/perf.odin](ui/perf.odin)), against a budget of 120 fps on any display (`ui.perf_budget_fps`): the CPU and the GPU each get 8.33 ms, since they work side by side. A 60 Hz screen would hide a frame that misses on a 120 Hz one.
+
+| Part | From, to |
+| --- | --- |
+| Tick | the frame wait's end to `begin_layout`: input and the app's own logic |
+| Layout | `begin_layout` to `end_layout`: building the UI and Clay's layout |
+| Draw | `begin_draw` to the last draw call: host drawing, `render`, the upload |
+| CPU | the frame wait's end to the swap: all of the above |
+| GPU | the frame's draw calls, from `GL_TIME_ELAPSED` queries read three frames late, so reading never stalls |
+| Swap | `end_draw`'s present wait and swap, mostly waiting: shown, not budgeted |
+| Frame | one frame to the next |
+
+`ui.debug_strip()` (F3) shows the last 120 frames' average and worst of each part, CPU and GPU in green, amber past half the budget, red over it. `ui.perf_stats()` returns the same numbers. A benchmark: `ui.perf_bench_start(warmup)`, a scripted session (`ui.perf_bench_frames()` says how far it is), then `ui.perf_report(title)`, which prints avg, p50, p99 and worst per part and returns false when CPU or GPU p99 is over budget.
 
 ## Designs
 
