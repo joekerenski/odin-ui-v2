@@ -367,9 +367,9 @@ upload :: proc(pipe: Pipeline, data: rawptr, n: int) -> (buffer: u32, base: int)
 	return
 }
 
-// Draw everything queued. The ui calls this itself at the end of the frame
-// and before handing a host a Custom element to draw. A host calls it before
-// drawing with raylib after ui.draw_* calls, so the two land in order.
+// Draw everything queued. The ui calls this itself at the end of the frame.
+// A host calls it before drawing with raylib after ui.draw_* calls (or in a
+// Custom_Draw), so the two land in order.
 flush_shapes :: proc() {
 	if len(s_sh.ranges) == 0 || !s_sh.ok {
 		clear(&s_sh.shapes)

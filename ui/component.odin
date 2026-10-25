@@ -88,8 +88,12 @@ drag_value_x :: proc(id: string, value, lo, hi: f32, inset: f32 = 0) -> f32 {
 //   board.custom = ui.Custom_Draw{draw = board_draw, data = &board}
 //   if clay.UI(clay.ID("Board"))({layout = ..., custom = {customData = &board.custom}}) {}
 //
-// `draw` gets the data and the element's box, in layout units, after the
-// shapes queued so far are drawn (so it may use raylib too).
+// `draw` gets the data and the element's box, in layout units. What it
+// draws with ui.draw_* lands in Clay's order. One that draws with raylib
+// calls flush_shapes first, so what the ui queued before it is drawn under
+// it. The ui doesn't do that for every Custom element: a flush mid-frame
+// re-uploads into a buffer the GPU is still reading, a stall on macOS of
+// most of a millisecond.
 
 Custom :: union {
 	Custom_Draw,
@@ -250,8 +254,6 @@ dispatch_custom :: proc(cmd: ^clay.RenderCommand) {
 	box := cmd.boundingBox
 	switch &d in c^ {
 	case Custom_Draw:
-		// The host may draw with raylib: shapes so far go first.
-		flush_shapes()
 		if d.draw != nil { d.draw(d.data, box) }
 	case Custom_Triangle:
 		draw_triangle({box.x + d.a.x, box.y + d.a.y}, {box.x + d.b.x, box.y + d.b.y}, {box.x + d.c.x, box.y + d.c.y}, d.color)
