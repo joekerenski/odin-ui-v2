@@ -46,7 +46,7 @@ Window_Desc :: struct {
 	height:     i32,
 	resizable:  bool,
 	high_dpi:   bool,
-	msaa_4x:    bool,
+	msaa_4x:    bool, // only for a host's own rl.* shapes: the UI smooths its edges itself
 	target_fps: i32, // 0 = the display's refresh
 	// Smallest window, in points. Zooming in also stops where the layout
 	// would get smaller than this.
@@ -153,6 +153,7 @@ init :: proc(desc: Window_Desc) {
 	clay_setup(desc)
 	reset_styles()
 	custom_setup()
+	shapes_setup()
 }
 
 shutdown :: proc() {
@@ -168,6 +169,7 @@ shutdown :: proc() {
 	fonts = nil
 	glyphs_teardown()
 	custom_teardown()
+	shapes_teardown()
 	idle_teardown()
 	anim_teardown()
 	design_teardown()
@@ -345,12 +347,14 @@ end_layout :: proc() -> clay.ClayArray(clay.RenderCommand) {
 begin_draw :: proc() {
 	rl.BeginDrawing()
 	rl.ClearBackground(to_rl_color(theme.bg))
+	shapes_frame_begin()
 	rlgl.PushMatrix()
 	rlgl.Scalef(zoom, zoom, 1)
 }
 
 end_draw :: proc() {
 	// Flush first so a present wait is followed by nothing but the swap.
+	flush_shapes()
 	rlgl.DrawRenderBatchActive()
 	rlgl.PopMatrix()
 	busy := time.since(frame_start)
@@ -380,6 +384,7 @@ end_draw :: proc() {
 // drawing, before end_draw. raylib's TakeScreenshot scales by the DPI a second
 // time on macOS: a 2x image with the frame in one corner.
 screenshot :: proc(path: cstring) -> bool {
+	flush_shapes()
 	rlgl.DrawRenderBatchActive()
 	w, h := framebuffer_size()
 	pixels := rlgl.ReadScreenPixels(w, h)
@@ -402,6 +407,7 @@ region :: proc(id: string, index: u32 = 0) -> (clay.BoundingBox, bool) {
 	return element_box(id, index)
 }
 
+// Clip what the host draws next, ui.draw_* and rl.* alike, to element `id`.
 begin_clip :: proc(id: string, index: u32 = 0) -> bool {
 	box, ok := element_box(id, index)
 	if !ok {
@@ -412,7 +418,7 @@ begin_clip :: proc(id: string, index: u32 = 0) -> bool {
 }
 
 end_clip :: proc() {
-	rl.EndScissorMode()
+	end_scissor()
 }
 
 element_hovered :: proc(id: string, index: u32 = 0) -> bool {

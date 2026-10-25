@@ -294,8 +294,8 @@ draw_glyph :: proc(face: Face_Id, glyph: u32, px: f32, x, y: f32, color: Color) 
 	g := cached_glyph(face, glyph, px)
 	if g.page < 0 { return }
 	rs := raster_scale()
-	dst := rl.Rectangle{snap_px(x + g.ox / rs), snap_px(y + g.oy / rs), g.rect.width / rs, g.rect.height / rs}
-	rl.DrawTexturePro(s_pages[g.page].tex, g.rect, dst, {0, 0}, 0, to_rl_color(color))
+	dst := Region_Box{snap_px(x + g.ox / rs), snap_px(y + g.oy / rs), g.rect.width / rs, g.rect.height / rs}
+	push_texture(s_pages[g.page].tex, g.rect, dst, color)
 }
 
 // `s` in a font slot at a size, its top-left at (x, y) in layout units (as Clay places text).

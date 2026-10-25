@@ -68,9 +68,18 @@ Once the probe shows the full refresh with the default stack, EGL vsync would wo
 
 Text is drawn from a glyph cache ([ui/glyphs.odin](ui/glyphs.odin)). Fonts are read with stb_truetype, and each glyph is rasterized the first time it is drawn, at `fontSize * dpi` pixels, into 1024² atlas pages. It is drawn with bilinear filtering and no mipmaps, snapped to the physical pixel grid; trilinear filtering is what softens raylib text. A character the font lacks comes from a fallback font, sized to the same em: ones added with `ui.add_fallback_font`, then system fonts (STIX for math, Greek and arrows, Apple Symbols, Arial Unicode, Hiragino for CJK on macOS; DejaVu and Noto on Linux). `ui.draw_glyph` draws by glyph id, for layouts that place glyphs themselves. There is no shaping: ligatures, Arabic and other scripts that need it draw character by character. Color emoji fonts aren't supported.
 
-UI fills are rlgl triangles on a 1×1 white texture, which is also raylib's shapes texture, with rounded corners as triangle fans. Plain `DrawRectangle` and friends work too; rlgl turns quads into triangles on this GL 4.1 context.
+Everything the UI draws goes through one shader, one quad per thing ([ui/shapes.odin](ui/shapes.odin)):
 
-The renderer sets the scissor only when something draws, and only when the box differs from the one in effect. A scissor change flushes raylib's batch, and every clipped floating element (a slider knob, a segment label) arrives as its own Clay root with its own scissor start and end. Setting them eagerly cost 4 ms a frame on the Design tab.
+- **Shapes** are signed distance fields. The fragment shader works out how far each pixel is from the edge of a rounded box (each corner its own radius), a triangle, or a line, and fades the coverage over one physical pixel. Edges are smooth at any zoom without multisampling, and a large radius is as round as a small one.
+- **Borders** are the box minus the box inside its widths, so they follow the fill's curve exactly, with any width per side.
+- **Clay's rectangles and borders** snap to the physical pixel grid, so straight edges are crisp. Shapes a host draws do not snap, so they can move smoothly.
+- **Glyphs and images** are textured quads in the same stream.
+
+A frame's quads go to the GPU in one upload, with a new draw call only where the clip or the texture changes. Interleaving with raylib's batch instead cost a buffer upload at every switch between text and shapes, and macOS's GL stalls on each one. On the demo's tabs, drawing takes 0.3–0.7 ms, against 1.5–2.6 ms for the triangle-fan renderer this replaced.
+
+Hosts draw with `ui.draw_rect`, `draw_rect_lines`, `draw_circle`, `draw_ring`, `draw_line`, `draw_triangle` and `draw_gradient_pill`, in layout units. raylib's own `rl.*` drawing still works but is a separate batch: call `ui.flush_shapes()` before an `rl.*` call that must land on top of `ui.draw_*` output. A Custom element's draw proc gets a flush before it runs.
+
+The renderer applies a clip only when something draws, and only when it differs from the one in effect. Every clipped floating element (a slider knob, a segment label) arrives as its own Clay root with its own scissor start and end, almost always with the same box.
 
 ## Themes
 

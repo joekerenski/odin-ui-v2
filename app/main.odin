@@ -22,7 +22,6 @@ import "core:fmt"
 import "core:math"
 import "core:os"
 import "core:strings"
-import rl "../deps/raylib"
 
 // Embedded, so the binary runs from any directory.
 FONT :: #load("../fonts/Inter-Medium.ttf")
@@ -79,7 +78,6 @@ main :: proc() {
 		height     = 780,
 		resizable  = true,
 		high_dpi   = true,
-		msaa_4x    = true,
 		target_fps = 60,
 		min_width  = 720,
 		min_height = 480,
@@ -285,7 +283,6 @@ draw_graph :: proc(g: ^Graph) {
 	cx := box.x + box.width * 0.5
 	cy := box.y + box.height * 0.5
 
-	edge_col := ui.to_rl_color(ui.theme.border)
 	for e in g.edges {
 		ia := find_node(g, e.a)
 		ib := find_node(g, e.b)
@@ -294,17 +291,22 @@ draw_graph :: proc(g: ^Graph) {
 		}
 		a := g.nodes[ia].pos
 		b := g.nodes[ib].pos
-		rl.DrawLineEx({cx + a.x, cy + a.y}, {cx + b.x, cy + b.y}, 2, edge_col)
+		ui.draw_line({cx + a.x, cy + a.y}, {cx + b.x, cy + b.y}, 2, ui.theme.border)
 	}
 
-	fid, fsize := ui.theme.font_small, ui.theme.size_small
+	// Shapes first, then the labels: shapes and text are separate batches, so
+	// each switch between them is a draw call.
 	for n in g.nodes {
 		p := [2]f32{cx + n.pos.x, cy + n.pos.y}
 		col := ui.theme.accent if n.id == g.selected else ui.theme.surface_hot
 		ui.draw_circle(p.x, p.y, NODE_R, col)
 		if n.id == g.selected {
-			rl.DrawCircleLinesV(p, NODE_R + 4, ui.to_rl_color(ui.theme.accent_hot))
+			ui.draw_ring(p.x, p.y, NODE_R + 5, 1.5, ui.theme.accent_hot)
 		}
+	}
+	fid, fsize := ui.theme.font_small, ui.theme.size_small
+	for n in g.nodes {
+		p := [2]f32{cx + n.pos.x, cy + n.pos.y}
 		label := fmt.tprintf("%d", n.id)
 		w, h := ui.text_width(label, fid, fsize), ui.text_draw_size(fid, fsize)
 		ui.draw_text(label, p.x - w * 0.5, p.y - h * 0.5, fid, fsize, ui.theme.text)

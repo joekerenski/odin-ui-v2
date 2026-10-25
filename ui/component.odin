@@ -83,8 +83,6 @@ drag_value_x :: proc(id: string, value, lo, hi: f32, inset: f32 = 0) -> f32 {
 // pointers stay valid from layout → render. Cleared at begin_layout.
 
 Custom_Kind :: enum u8 {
-	// Filled circle centered in the element's box; r = min(w,h)/2.
-	Circle,
 	// Triangle; a/b/c are offsets from the box's top-left.
 	Triangle,
 	// Horizontal gradient through `stops`, as a pill (ends rounded to half
@@ -156,13 +154,11 @@ custom_push :: proc(d: Custom_Data) -> rawptr {
 // (cx, cy). Size is 2*r. clipTo is .AttachedParent: that clips to the parent's
 // enclosing clip region (a scroll container), not to the parent's own box, so
 // a knob still hangs past its track's ends but scrolls out under the edge.
+// A plain element whose corners are half its size: the renderer draws round
+// corners exactly, so a circle needs nothing Custom.
 custom_circle_at :: proc(id, parent_id: string, cx, cy, r: f32, color: Color, index: u32 = 0) {
 	parent, ok := element_box(parent_id)
 	if !ok {
-		return
-	}
-	ptr := custom_push({kind = .Circle, color = color})
-	if ptr == nil {
 		return
 	}
 	d := max(1, r * 2)
@@ -183,7 +179,8 @@ custom_circle_at :: proc(id, parent_id: string, cx, cy, r: f32, color: Color, in
 			// Decoration: hovering it still hovers the control under it.
 			pointerCaptureMode = .Passthrough,
 		},
-		custom = {customData = ptr},
+		backgroundColor = color,
+		cornerRadius    = clay.CornerRadiusAll(r),
 	}) {}
 }
 
@@ -242,11 +239,6 @@ dispatch_custom :: proc(cmd: ^clay.RenderCommand) {
 	}
 	box := cmd.boundingBox
 	switch data.kind {
-	case .Circle:
-		cx := box.x + box.width * 0.5
-		cy := box.y + box.height * 0.5
-		r := min(box.width, box.height) * 0.5
-		draw_circle(cx, cy, r, data.color)
 	case .Triangle:
 		draw_triangle(
 			{box.x + data.a.x, box.y + data.a.y},
@@ -259,6 +251,8 @@ dispatch_custom :: proc(cmd: ^clay.RenderCommand) {
 	case .Rich:
 		draw_rich((^Rich_Layout)(data), box)
 	case .Draw:
+		// The host may draw with raylib: shapes so far go first.
+		flush_shapes()
 		if data.draw != nil { data.draw(data, box) }
 	}
 }
