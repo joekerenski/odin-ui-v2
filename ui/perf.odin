@@ -14,16 +14,17 @@ import gl "vendor:OpenGL"
 // (they work side by side). F3 shows the debug strip: the last 120 frames'
 // average and worst of each part, colored against the budget.
 //
-//   Tick    the frame wait's end to begin_layout: input, the app's own logic
+//   Tick    `frame` returning to begin_layout: the app's own logic
 //   Layout  begin_layout to end_layout: building the UI, Clay's layout
 //   Draw    begin_draw to the last draw call: host drawing, render, the upload
-//   CPU     the frame wait's end to the swap: all of the above
+//   CPU     `frame` returning to the last draw call: all of the above
 //   GPU     the frame's draw calls, from GL_TIME_ELAPSED queries read three
 //           frames late, so reading them never stalls
 //   Swap    end_draw's present wait and swap: mostly waiting, shown, not budgeted
 //   Frame   from one frame to the next
 //
-// The wait for the frame's slot happens in `frame` and counts nowhere. Idle
+// The wait for the frame's slot, and polling input after it, happen in
+// `frame` and count nowhere. Idle
 // ticks (idle.odin) draw nothing and aren't frames here.
 //
 // A benchmark: perf_bench_start, then a scripted session (perf_bench_frames

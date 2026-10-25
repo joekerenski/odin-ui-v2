@@ -4,9 +4,10 @@ import clay "../deps/clay"
 import "core:math"
 import rl "../deps/raylib"
 
-// Clay render commands to the screen. Rectangles and borders are shapes
-// (shapes.odin): one quad each, edges on the physical pixel grid, corners
-// from the shader. Text and images go through raylib's batch.
+// Clay render commands to the screen, through the stream in shapes.odin:
+// rectangles and borders are shapes with their edges on the physical pixel
+// grid, text and images are glyph quads. Clips and overlays (fades) are the
+// stream's state, so Custom elements get them too.
 
 to_rl_color :: proc(color: Color) -> rl.Color {
 	return {u8(color[0]), u8(color[1]), u8(color[2]), u8(color[3])}
@@ -16,25 +17,6 @@ to_rl_color :: proc(color: Color) -> rl.Color {
 snap_px :: proc(v: f32) -> f32 {
 	s := raster_scale()
 	return math.round(v * s) / s
-}
-
-// The stack holds each overlay already multiplied into its parents, so the
-// top is the whole effect.
-@(private)
-apply_overlay :: proc(color: Color, overlay: [dynamic]Color) -> Color {
-	if len(overlay) == 0 {
-		return color
-	}
-	o := overlay[len(overlay) - 1]
-	if o[0] == 0 && o[1] == 0 && o[2] == 0 && o[3] == 0 {
-		return {0, 0, 0, 0}
-	}
-	return {
-		color[0] * o[0] / 255.0,
-		color[1] * o[1] / 255.0,
-		color[2] * o[2] / 255.0,
-		color[3] * o[3] / 255.0,
-	}
 }
 
 // Clips go into the shape stream, which sets them on GL when it draws.
@@ -74,6 +56,7 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 			end_scissor()
 		}
 	}
+	defer s_sh.overlay = nil
 	defer if active != nil {
 		end_scissor()
 	}
@@ -86,20 +69,16 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 			sync(&active, clips)
 			config := cmd.renderData.text
 			t := string(config.stringContents.chars[:config.stringContents.length])
-			draw_text(t, b.x, b.y, config.fontId, config.fontSize, apply_overlay(config.textColor, overlay), f32(config.letterSpacing))
+			draw_text(t, b.x, b.y, config.fontId, config.fontSize, config.textColor, f32(config.letterSpacing))
 		case .Image:
 			sync(&active, clips)
 			tex := (^rl.Texture2D)(cmd.renderData.image.imageData)
 			if tex == nil || tex.width == 0 {
 				continue
 			}
-			tint: Color = {255, 255, 255, 255}
-			if len(overlay) > 0 {
-				tint = overlay[len(overlay) - 1]
-			}
-			// Scaled to the box's width, as raylib's DrawTextureEx did.
+			// Scaled to the box's width, keeping the image's shape.
 			h := f32(tex.height) * b.width / f32(tex.width)
-			push_texture(tex^, {0, 0, f32(tex.width), f32(tex.height)}, {b.x, b.y, b.width, h}, tint)
+			push_texture(tex^, {0, 0, f32(tex.width), f32(tex.height)}, {b.x, b.y, b.width, h}, {255, 255, 255, 255})
 		case .ScissorStart:
 			r := b
 			if len(clips) > 0 {
@@ -116,22 +95,24 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 		case .Rectangle:
 			sync(&active, clips)
 			config := cmd.renderData.rectangle
-			draw_round_rect(b, config.cornerRadius, apply_overlay(config.backgroundColor, overlay))
+			draw_round_rect(b, config.cornerRadius, config.backgroundColor)
 		case .Border:
 			sync(&active, clips)
 			config := cmd.renderData.border
-			draw_border(b, config, apply_overlay(config.color, overlay))
+			draw_border(b, config, config.color)
 		case .OverlayColorStart:
+			// Each overlay is multiplied into its parents, so the top is the whole effect.
 			c := cmd.renderData.overlayColor.color
 			if len(overlay) > 0 {
-				p := overlay[len(overlay) - 1]
-				c = {c[0] * p[0] / 255, c[1] * p[1] / 255, c[2] * p[2] / 255, c[3] * p[3] / 255}
+				c = fade(c, overlay[len(overlay) - 1])
 			}
 			append(&overlay, c)
+			s_sh.overlay = c
 		case .OverlayColorEnd:
 			if len(overlay) > 0 {
 				pop(&overlay)
 			}
+			s_sh.overlay = overlay[len(overlay) - 1] if len(overlay) > 0 else nil
 		case .Custom:
 			sync(&active, clips)
 			dispatch_custom(cmd)

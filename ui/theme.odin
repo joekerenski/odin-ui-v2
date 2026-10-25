@@ -243,9 +243,12 @@ palette_from_base :: proc(b: Theme_Base) -> Palette {
 	if b.text_on_accent.a > 0 {
 		p.text_on_accent = opaque(b.text_on_accent)
 	}
-	p.warning = b.warning if b.warning.a > 0 else PALETTE_DARK.warning
-	p.danger = b.danger if b.danger.a > 0 else PALETTE_DARK.danger
-	p.success = b.success if b.success.a > 0 else PALETTE_DARK.success
+	// Status colors a source leaves out come from the built-in base of its mode: tuned to
+	// read on dark or on light.
+	fall := BASE_DARK if dark else BASE_LIGHT
+	p.warning = b.warning if b.warning.a > 0 else fall.warning
+	p.danger = b.danger if b.danger.a > 0 else fall.danger
+	p.success = b.success if b.success.a > 0 else fall.success
 	p.canvas = mix(bg, {0, 0, 0, 255}, 0.22) if dark else mix(bg, {255, 255, 255, 255}, 0.5)
 	p.scrim = p.panel
 	p.scrim.a = 215

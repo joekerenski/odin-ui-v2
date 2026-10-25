@@ -200,8 +200,10 @@ s_pages: [dynamic]Page
 @(private)
 s_glyphs: map[Glyph_Key]Cached_Glyph
 
-// Drops every rasterized glyph (the display scale or zoom changed: new pixel sizes).
+// Drops every rasterized glyph (the display scale or zoom changed: new pixel sizes, or the
+// pages are full). Glyphs already queued this frame are drawn first: they use these pages.
 glyph_cache_clear :: proc() {
+	flush_shapes()
 	for p in s_pages { rl.UnloadTexture(p.tex) }
 	clear(&s_pages)
 	clear(&s_glyphs)

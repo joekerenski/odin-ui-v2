@@ -53,6 +53,7 @@ changed :: proc() -> bool {
 	if !ok || b == s_last {
 		return false
 	}
+	s_last = b
 	return true
 }
 

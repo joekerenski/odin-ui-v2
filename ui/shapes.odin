@@ -228,6 +228,7 @@ s_sh: struct {
 	glyphs:  [dynamic]Glyph,
 	ranges:  [dynamic]Draw_Range,
 	clip:    Maybe(Region_Box), // in effect for new quads
+	overlay: Maybe(Color),      // multiplies new quads' colors (Clay's fades)
 	ok:      bool,
 }
 
@@ -442,6 +443,11 @@ join_range :: proc(pipe: Pipeline, first: int, tex: u32) {
 
 @(private)
 push_shape :: proc(s: Shape) {
+	s := s
+	if o, ok := s_sh.overlay.?; ok {
+		s.color0 = rgba8(fade(color_of(s.color0), o))
+		s.color1 = rgba8(fade(color_of(s.color1), o))
+	}
 	join_range(.Shapes, len(s_sh.shapes), 0)
 	append(&s_sh.shapes, s)
 	if len(s_sh.shapes) >= QUADS_PER_FRAME {
@@ -452,6 +458,10 @@ push_shape :: proc(s: Shape) {
 // A textured quad: `src` in texels of `tex`, drawn at `dst`, tinted.
 @(private)
 push_texture :: proc(tex: rl.Texture2D, src: rl.Rectangle, dst: Region_Box, tint: Color) {
+	tint := tint
+	if o, ok := s_sh.overlay.?; ok {
+		tint = fade(tint, o)
+	}
 	if tex.id == 0 || tex.width == 0 || tex.height == 0 || tint.a <= 0 {
 		return
 	}
@@ -481,6 +491,18 @@ gl_clip :: proc(clip: Maybe(Region_Box)) {
 	x1, y1 := math.round((b.x + b.width) * s), math.round((b.y + b.height) * s)
 	rlgl.EnableScissorTest()
 	rlgl.Scissor(i32(x0), fh - i32(y1), i32(max(0, x1 - x0)), i32(max(0, y1 - y0)))
+}
+
+// A color times an overlay, channel by channel: how Clay's overlay fades work here (Clay's
+// docs describe a mix; multiplying by white at an alpha is the fade).
+@(private)
+fade :: proc(c, overlay: Color) -> Color {
+	return c * overlay / 255
+}
+
+@(private)
+color_of :: proc(c: [4]u8) -> Color {
+	return {f32(c.r), f32(c.g), f32(c.b), f32(c.a)}
 }
 
 @(private)

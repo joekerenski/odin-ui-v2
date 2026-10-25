@@ -736,10 +736,11 @@ color_picker :: proc(id: string, c: Color) -> (out: Color, changed: bool) {
 
 // A 0..1 slider over a gradient track, the knob showing the color under it.
 gradient_slider :: proc(id: string, t: f32, stops: []Color) -> f32 {
+	stops := stops[:min(len(stops), GRADIENT_STOPS)]
 	h := max(14, styles.slider.height * 2)
 	nt := drag_value_x(id, t, 0, 1, h * 0.5) // the knob travels inset by its radius
 	d := Custom_Data{kind = .Gradient}
-	for c, i in stops[:min(len(stops), GRADIENT_STOPS)] {
+	for c, i in stops {
 		d.stops[i] = c
 		d.count += 1
 	}

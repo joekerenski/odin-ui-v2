@@ -123,6 +123,8 @@ init :: proc(desc: Window_Desc) {
 	rl.SetTraceLogLevel(.ALL if desc.raylib_log else .ERROR)
 	rl.SetConfigFlags(flags)
 	rl.InitWindow(desc.width, desc.height, desc.title)
+	// Only raylib's own loop (X11) waits for this; macOS and Wayland pace themselves.
+	rl.SetTargetFPS(target_fps)
 	if !rl.IsWindowReady() {
 		// No window to draw in (no display, or a locked screen on macOS): say so rather than
 		// crash on the first GL call.
