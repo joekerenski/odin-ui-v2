@@ -1,7 +1,6 @@
 package ui
 
 import clay "../deps/clay"
-import "core:math"
 import rl "../deps/raylib"
 
 // Clay render commands to the screen, through the stream in shapes.odin:
@@ -9,69 +8,26 @@ import rl "../deps/raylib"
 // grid, text and images are glyph quads. Clips and overlays (fades) are the
 // stream's state, so Custom elements get them too.
 
-to_rl_color :: proc(color: Color) -> rl.Color {
-	return {u8(color[0]), u8(color[1]), u8(color[2]), u8(color[3])}
-}
-
-// Round a layout-space coordinate onto the physical pixel grid.
-snap_px :: proc(v: f32) -> f32 {
-	s := raster_scale()
-	return math.round(v * s) / s
-}
-
-// Clips go into the shape stream, which sets them on GL when it draws.
-@(private)
-set_scissor :: proc(b: clay.BoundingBox) {
-	shapes_clip(b)
-}
-
-@(private)
-end_scissor :: proc() {
-	shapes_clip(nil)
-}
-
 // Clip boxes nest: each is intersected with its parent, and closing one
-// restores the parent instead of turning clipping off.
-//
-// Every clipped floating element (each slider knob, each segment label) is
-// its own Clay root, bracketed in its own scissor start and end, mostly with
-// the same box as the one before. So the clip is only set when something
-// draws, and only when it differs from the one in effect: fewer draw ranges.
+// restores the parent. A clip is the stream's state for the quads after it;
+// GL's scissor is set when they're drawn. So the many clips Clay brackets
+// floating elements in (each slider knob, each segment label), mostly the
+// same box again, cost nothing unless what they hold draws.
 render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := context.temp_allocator) {
 	overlay := make([dynamic]Color, allocator)
 	clips := make([dynamic]clay.BoundingBox, allocator)
-	active: Maybe(clay.BoundingBox)
-	sync :: proc(active: ^Maybe(clay.BoundingBox), clips: [dynamic]clay.BoundingBox) {
-		want: Maybe(clay.BoundingBox)
-		if len(clips) > 0 {
-			want = clips[len(clips) - 1]
-		}
-		if active^ == want {
-			return
-		}
-		active^ = want
-		if box, ok := want.?; ok {
-			set_scissor(box)
-		} else {
-			end_scissor()
-		}
-	}
 	defer s_sh.overlay = nil
-	defer if active != nil {
-		end_scissor()
-	}
+	defer s_sh.clip = nil
 	for i in 0 ..< commands.length {
 		cmd := clay.RenderCommandArray_Get(commands, i32(i))
 		b := cmd.boundingBox
 		switch cmd.commandType {
 		case .None:
 		case .Text:
-			sync(&active, clips)
 			config := cmd.renderData.text
 			t := string(config.stringContents.chars[:config.stringContents.length])
 			draw_text(t, b.x, b.y, config.fontId, config.fontSize, config.textColor, f32(config.letterSpacing))
 		case .Image:
-			sync(&active, clips)
 			tex := (^rl.Texture2D)(cmd.renderData.image.imageData)
 			if tex == nil || tex.width == 0 {
 				continue
@@ -88,16 +44,16 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 				r = {x0, y0, max(0, x1 - x0), max(0, y1 - y0)}
 			}
 			append(&clips, r)
+			s_sh.clip = r
 		case .ScissorEnd:
 			if len(clips) > 0 {
 				pop(&clips)
 			}
+			s_sh.clip = clips[len(clips) - 1] if len(clips) > 0 else nil
 		case .Rectangle:
-			sync(&active, clips)
 			config := cmd.renderData.rectangle
 			draw_round_rect(b, config.cornerRadius, config.backgroundColor)
 		case .Border:
-			sync(&active, clips)
 			config := cmd.renderData.border
 			draw_border(b, config, config.color)
 		case .OverlayColorStart:
@@ -114,7 +70,6 @@ render :: proc(commands: ^clay.ClayArray(clay.RenderCommand), allocator := conte
 			}
 			s_sh.overlay = overlay[len(overlay) - 1] if len(overlay) > 0 else nil
 		case .Custom:
-			sync(&active, clips)
 			dispatch_custom(cmd)
 		}
 	}

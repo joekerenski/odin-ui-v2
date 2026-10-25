@@ -238,8 +238,8 @@ GL_UNSIGNED_BYTE :: 0x1401
 @(private)
 shapes_setup :: proc() {
 	corners := [6][2]f32{{0, 0}, {0, 1}, {1, 0}, {1, 0}, {0, 1}, {1, 1}}
-	ok := pipe_setup(&s_sh.pipes[.Shapes], SHAPE_VS, SHAPE_FS, size_of(Shape), &corners)
-	ok &&= pipe_setup(&s_sh.pipes[.Glyphs], GLYPH_VS, GLYPH_FS, size_of(Glyph), &corners)
+	ok := pipe_setup(&s_sh.pipes[.Shapes], SHAPE_VS, SHAPE_FS, size_of(Shape), 7, &corners)
+	ok &&= pipe_setup(&s_sh.pipes[.Glyphs], GLYPH_VS, GLYPH_FS, size_of(Glyph), 3, &corners)
 	if !ok {
 		fmt.eprintln("ui: a UI shader did not compile; the UI will not draw")
 		return
@@ -253,7 +253,7 @@ shapes_setup :: proc() {
 // A program, a VAO with the unit quad at location 0, and the instance
 // buffers. Attribute pointers are set per draw range (point_instances).
 @(private)
-pipe_setup :: proc(p: ^Pipe, vs, fs: cstring, stride: int, corners: ^[6][2]f32) -> bool {
+pipe_setup :: proc(p: ^Pipe, vs, fs: cstring, stride: int, attributes: u32, corners: ^[6][2]f32) -> bool {
 	// raylib's loader, which falls back to its default shader on an error:
 	// the check below.
 	p.shader = rl.LoadShaderFromMemory(vs, fs)
@@ -274,8 +274,7 @@ pipe_setup :: proc(p: ^Pipe, vs, fs: cstring, stride: int, corners: ^[6][2]f32) 
 	for &b in p.buffers {
 		b = rlgl.LoadVertexBuffer(nil, i32(QUADS_PER_FRAME * stride), true)
 	}
-	n := u32(7) if stride == size_of(Shape) else 3
-	for i in u32(1) ..= n {
+	for i in u32(1) ..= attributes {
 		rlgl.EnableVertexAttribute(i)
 		rlgl.SetVertexAttributeDivisor(i, 1)
 	}
@@ -534,6 +533,12 @@ push_box :: proc(b: Region_Box, radii: [4]f32, c0, c1: Color, inset: [4]f32 = {}
 		color1 = rgba8(c1),
 		kind   = f32(Shape_Kind.Box),
 	})
+}
+
+// Round a layout-space coordinate onto the physical pixel grid.
+snap_px :: proc(v: f32) -> f32 {
+	s := raster_scale()
+	return math.round(v * s) / s
 }
 
 // A box's edges on the physical pixel grid, so fills and borders are crisp.

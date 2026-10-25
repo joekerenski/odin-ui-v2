@@ -1,55 +1,37 @@
 package ui
 
 import "base:runtime"
-import "core:strings"
+import "core:fmt"
 import "core:unicode/utf8"
 import clay "../deps/clay"
 
-// Font slots (a face and its nominal size, by Clay font id) and measuring text with them, the
-// way glyphs.odin draws it.
-
-// A font comes from a file (`path`, owned) or from memory (`data`, borrowed:
-// typically #load'ed, so it lives as long as the program). Its glyphs are
-// rasterized on demand at each size drawn (see glyphs.odin).
-Font_Slot :: struct {
-	face: Face_Id,
-	size: u16,
-	path: string,
-	data: []u8,
-}
+// Font slots, by Clay font id, and measuring text the way glyphs.odin draws it. A slot is a
+// face; glyphs are rasterized on demand at each size drawn.
 
 @(private)
-fonts: [dynamic]Font_Slot
-// Glyphs are rasterized at fontSize * display scale, so each texel is one
-// framebuffer pixel when drawn at `size` in point space.
-load_font :: proc(font_id: u16, size: u16, path: cstring) {
-	f := reset_font_slot(font_id, size)
-	f.path = strings.clone(string(path))
-	f.face = face_from_path(f.path)
-	if f.face == NO_FACE {
-		warn_font(f^)
-	}
+fonts: [dynamic]Face_Id
+
+// A font from a file into slot `font_id`.
+load_font :: proc(font_id: u16, path: cstring) {
+	set_slot(font_id, face_from_path(string(path)), string(path))
 }
 
 // Same from TTF/OTF bytes, e.g. `#load("fonts/Inter-Medium.ttf")`, so the
 // binary doesn't depend on the working directory. `data` must outlive the UI.
-load_font_data :: proc(font_id: u16, size: u16, data: []u8) {
-	f := reset_font_slot(font_id, size)
-	f.data = data
-	f.face = face_from_data(data)
-	if f.face == NO_FACE {
-		warn_font(f^)
-	}
+load_font_data :: proc(font_id: u16, data: []u8) {
+	set_slot(font_id, face_from_data(data), "(from memory)")
 }
 
 // Faces stay loaded until shutdown (another slot may share one).
 @(private)
-reset_font_slot :: proc(font_id: u16, size: u16) -> ^Font_Slot {
-	ensure_font_slot(font_id)
-	f := &fonts[font_id]
-	delete(f.path)
-	f^ = {face = NO_FACE, size = size}
-	return f
+set_slot :: proc(font_id: u16, face: Face_Id, name: string) {
+	for len(fonts) <= int(font_id) {
+		append(&fonts, NO_FACE)
+	}
+	fonts[font_id] = face
+	if face == NO_FACE {
+		fmt.eprintln("ui: font failed to load:", name)
+	}
 }
 
 // The size to draw (and measure) text at, in layout units. Glyphs are
@@ -64,12 +46,6 @@ text_draw_size :: proc(font_id: u16, font_size: u16) -> f32 {
 	return slot_px(font_id, font_size) / raster_scale()
 }
 
-@(private)
-ensure_font_slot :: proc(id: u16) {
-	for len(fonts) <= int(id) {
-		append(&fonts, Font_Slot{face = NO_FACE})
-	}
-}
 // Matches draw_text: rounded pixel advances, spacing added per codepoint.
 @(private)
 measure_text :: proc "c" (

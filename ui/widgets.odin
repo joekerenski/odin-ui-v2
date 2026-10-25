@@ -58,24 +58,16 @@ root_begin :: proc(id: string = "Root", transparent: bool = false, direction: cl
 // Side panel column. Scrolls when its content is taller than the window;
 // close it with panel_end(id), which draws the scrollbar.
 panel_begin :: proc(id: string = "Panel") -> bool {
-	scroll_track(id)
-	scrollbar_drag(id)
-	clay.OpenElementWithId(clay.ID(id))
-	return clay.ConfigureOpenElement(clay.ElementDeclaration{
-		layout = {
-			sizing          = {width = clay.SizingFixed(theme.panel_w), height = clay.SizingGrow({})},
-			layoutDirection = .TopToBottom,
-			padding         = clay.PaddingAll(theme.pad_md + 2),
-			childGap        = theme.gap_md,
-		},
-		backgroundColor = theme.panel,
-		clip            = {vertical = true, childOffset = clay.GetScrollOffset()},
-	})
+	return scroll_open(id, {
+		sizing          = {width = clay.SizingFixed(theme.panel_w), height = clay.SizingGrow({})},
+		layoutDirection = .TopToBottom,
+		padding         = clay.PaddingAll(theme.pad_md + 2),
+		childGap        = theme.gap_md,
+	}, theme.panel)
 }
 
 panel_end :: proc(id: string = "Panel") {
-	clay.CloseElement()
-	scrollbar(id)
+	scroll_end(id)
 }
 
 // Full-width bar with a bottom border, children in a centered row. Put it
@@ -192,24 +184,31 @@ element_end :: proc() {
 // The drag is resolved here, before the container opens, so the new offset
 // lands in this frame's layout.
 scroll_begin :: proc(id: string) -> bool {
-	scroll_track(id)
-	scrollbar_drag(id)
-	clay.OpenElementWithId(clay.ID(id))
-	return clay.ConfigureOpenElement(clay.ElementDeclaration{
-		layout = {
-			sizing          = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
-			layoutDirection = .TopToBottom,
-			padding         = clay.PaddingAll(scroll_padding()),
-			childGap        = theme.gap_md * 2,
-			childAlignment  = {x = .Center},
-		},
-		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+	return scroll_open(id, {
+		sizing          = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+		layoutDirection = .TopToBottom,
+		padding         = clay.PaddingAll(scroll_padding()),
+		childGap        = theme.gap_md * 2,
+		childAlignment  = {x = .Center},
 	})
 }
 
 scroll_end :: proc(id: string) {
 	clay.CloseElement()
 	scrollbar(id)
+}
+
+// A vertically scrolling container: eased wheel, a draggable thumb.
+@(private)
+scroll_open :: proc(id: string, layout: clay.LayoutConfig, bg: Color = {}) -> bool {
+	scroll_track(id)
+	scrollbar_drag(id)
+	clay.OpenElementWithId(clay.ID(id))
+	return clay.ConfigureOpenElement(clay.ElementDeclaration{
+		layout          = layout,
+		backgroundColor = bg,
+		clip            = {vertical = true, childOffset = clay.GetScrollOffset()},
+	})
 }
 
 // Where on the thumb the drag grabbed it, so the thumb doesn't jump.
@@ -370,9 +369,9 @@ icon_button :: proc(id: string, icon: Icon = .ChevronLeft) -> bool {
 		col := theme.text
 		#partial switch icon {
 		case .ChevronLeft:
-			custom_triangle_at(fmt.tprintf("%s_ico", id), id, {cx - 4.5, cy}, {cx + 3.5, cy - 5.5}, {cx + 3.5, cy + 5.5}, col)
+			triangle_at(fmt.tprintf("%s_ico", id), id, {cx - 4.5, cy}, {cx + 3.5, cy - 5.5}, {cx + 3.5, cy + 5.5}, col)
 		case .ChevronRight:
-			custom_triangle_at(fmt.tprintf("%s_ico", id), id, {cx + 4.5, cy}, {cx - 3.5, cy - 5.5}, {cx - 3.5, cy + 5.5}, col)
+			triangle_at(fmt.tprintf("%s_ico", id), id, {cx + 4.5, cy}, {cx - 3.5, cy - 5.5}, {cx - 3.5, cy + 5.5}, col)
 		}
 	}
 	return clicked(id)
@@ -432,7 +431,7 @@ toggle_switch :: proc(id, label: string, on: bool) -> bool {
 		pad := max(2, math.round(track_h * 0.12))
 		r := track_h * 0.5 - pad
 		x := box.x + pad + r + k * (box.width - 2 * pad - 2 * r)
-		custom_circle_at(fmt.tprintf("%s_knob", id), track_id, x, box.y + box.height * 0.5, r, mix(theme.text, theme.text_on_accent, kc))
+		circle_at(fmt.tprintf("%s_knob", id), track_id, x, box.y + box.height * 0.5, r, mix(theme.text, theme.text_on_accent, kc))
 	}
 	if clicked(id) {
 		return !on
@@ -495,13 +494,13 @@ slider :: proc(id, label: string, value: f32, lo, hi: f32, value_fmt: string = "
 	}
 
 	// Knob from previous-frame track box. It hangs past the ends at min/max
-	// by design; see custom_circle_at for clipping.
+	// by design; see circle_at for clipping.
 	if box, ok := element_box(id); ok {
 		x := box.x + tk * box.width
 		cy := box.y + box.height * 0.5
 		r := knob_radius() * (1 + 0.25 * hk)
-		custom_circle_at(fmt.tprintf("%s_knob", id), id, x, cy, r, theme.accent)
-		custom_circle_at(fmt.tprintf("%s_knob_in", id), id, x, cy, r * 0.5, theme.bg)
+		circle_at(fmt.tprintf("%s_knob", id), id, x, cy, r, theme.accent)
+		circle_at(fmt.tprintf("%s_knob_in", id), id, x, cy, r * 0.5, theme.bg)
 	}
 	return v
 }
@@ -547,7 +546,7 @@ dropdown :: proc(
 			s, co := math.sin(a), math.cos(a)
 			return {c.x + p.x * co - p.y * s, c.y + p.x * s + p.y * co}
 		}
-		custom_triangle_at(
+		triangle_at(
 			fmt.tprintf("%s_chev", id),
 			id,
 			turn(c, {-3.5, -1.75}, spin),
@@ -720,7 +719,7 @@ gradient_slider :: proc(id: string, t: f32, stops: []Color) -> f32 {
 	stops := stops[:min(len(stops), GRADIENT_STOPS)]
 	h := max(14, theme.slider_h * 2)
 	nt := drag_value_x(id, t, 0, 1, h * 0.5) // the knob travels inset by its radius
-	d := Custom_Data{kind = .Gradient}
+	d: Custom_Gradient
 	for c, i in stops {
 		d.stops[i] = c
 		d.count += 1
@@ -736,8 +735,8 @@ gradient_slider :: proc(id: string, t: f32, stops: []Color) -> f32 {
 		f := nt * f32(len(stops) - 1)
 		i := min(int(f), len(stops) - 1)
 		under := stops[i] if i + 1 >= len(stops) else mix(stops[i], stops[i + 1], f - f32(i))
-		custom_circle_at(fmt.tprintf("%s_ring", id), id, x, cy, r + 2, theme.text)
-		custom_circle_at(fmt.tprintf("%s_dot", id), id, x, cy, r - 1, under)
+		circle_at(fmt.tprintf("%s_ring", id), id, x, cy, r + 2, theme.text)
+		circle_at(fmt.tprintf("%s_dot", id), id, x, cy, r - 1, under)
 	}
 	return nt
 }

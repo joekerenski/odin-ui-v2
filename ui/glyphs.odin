@@ -2,7 +2,6 @@ package ui
 
 import rl "../deps/raylib"
 import "core:c"
-import "core:fmt"
 import "core:math"
 import "core:os"
 import "core:strings"
@@ -335,7 +334,7 @@ fallback_px :: proc(primary, fallback: Face_Id, px: f32) -> f32 {
 // The face a font slot draws with, NO_FACE if it has none.
 slot_face :: proc(font_id: u16) -> Face_Id {
 	if int(font_id) >= len(fonts) { return NO_FACE }
-	return fonts[font_id].face
+	return fonts[font_id]
 }
 
 // The pixel height a slot's text rasterizes at: the size in points times the raster scale,
@@ -343,14 +342,4 @@ slot_face :: proc(font_id: u16) -> Face_Id {
 @(private)
 slot_px :: proc(font_id: u16, font_size: u16) -> f32 {
 	return max(1, math.round(f32(font_size) * raster_scale()))
-}
-
-@(private)
-font_name :: proc(f: Font_Slot) -> string {
-	return f.path if f.path != "" else "(from memory)"
-}
-
-@(private)
-warn_font :: proc(f: Font_Slot) {
-	fmt.eprintln("ui: font failed to load:", font_name(f))
 }

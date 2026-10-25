@@ -246,3 +246,59 @@ scroll_after_wheel :: proc() {
 		data.scrollPosition.y = math.clamp(y, -max_scroll, 0)
 	}
 }
+
+// --- Clay fades ------------------------------------------------------------------
+//
+// Menus and palettes fade with Clay's transitions, on its overlay color (the
+// renderer multiplies by it). Clay emits no overlay command for an alpha of
+// 0, which would draw the element fully opaque for a frame, so "invisible" is
+// an alpha of 1: 1/255, too faint to see.
+
+@(private)
+FADE_INVISIBLE :: 1.0
+
+@(private)
+fade_enter_initial :: proc "c" (
+	initialState: clay.TransitionData,
+	properties: clay.TransitionPropertyFlags,
+) -> clay.TransitionData {
+	out := initialState
+	// Start effectively invisible (NOT 0 — see FADE_INVISIBLE note above).
+	out.overlayColor = {255, 255, 255, FADE_INVISIBLE}
+	return out
+}
+
+@(private)
+fade_exit_final :: proc "c" (
+	finalState: clay.TransitionData,
+	properties: clay.TransitionPropertyFlags,
+) -> clay.TransitionData {
+	out := finalState
+	out.overlayColor = {255, 255, 255, FADE_INVISIBLE}
+	return out
+}
+
+// A fade in when the element appears. It disappears at once, unless `fade_out`: an element
+// fading out is no longer declared, so Clay draws its last frame again, with the text pointers
+// that frame had. Text made for that frame (tprintf, a temp string, anything freed or reused
+// since) is then garbage, drawn as boxes. Fade out only what shows text that outlives the fade
+// (string constants, strings the app keeps).
+fade_transition :: proc(duration: f32 = 0.18, fade_out := false) -> clay.TransitionElementConfig {
+	return clay.TransitionElementConfig{
+		duration   = duration,
+		properties = {.OverlayColor},
+		handler    = clay.EaseOut,
+		// Nothing moves, so a menu fading in already takes the pointer (and
+		// keeps clicks off what's under it). Exiting still lets it through.
+		interactionHandling = .AllowInteractionsWhileTransitioningPosition,
+		enter = {
+			setInitialState = fade_enter_initial,
+			// Fire even when the parent also just appeared (modals, menus).
+			trigger         = .TriggerOnFirstParentFrame,
+		},
+		exit = {
+			setFinalState = fade_exit_final if fade_out else nil,
+			trigger       = .TriggerWhenParentExits,
+		},
+	}
+}

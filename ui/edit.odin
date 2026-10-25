@@ -57,9 +57,7 @@ Text_Edit :: struct {
 	redo:       [dynamic]Edit_Snapshot,
 	last_kind:  Edit_Kind,
 	last_time:  f64,
-	clicks:     int, // within a run of quick clicks: 1, 2 (word), 3 (line)
-	click_time: f64,
-	click_pos:  [2]f32,
+	click:      Clicks, // 1, 2 (a word), 3 (the line)
 	follow:     bool, // scroll the caret into view
 }
 
@@ -265,8 +263,12 @@ text_edit :: proc(id: string, e: ^Text_Edit, opts: Edit_Opts = {}) -> (res: Edit
 	}
 	content_h := f32(len(ed.lines)) * ed.line_h
 	e.scroll.y = clamp(e.scroll.y, 0, max(0, content_h - view_h)) if opts.multiline else 0
-	content_w := text_width(text, ed.font, ed.size) + 2
-	e.scroll.x = clamp(e.scroll.x, 0, max(0, content_w - view_w)) if !opts.multiline else 0
+	if opts.multiline {
+		e.scroll.x = 0
+	} else {
+		content_w := text_width(text, ed.font, ed.size) + 2
+		e.scroll.x = clamp(e.scroll.x, 0, max(0, content_w - view_w))
+	}
 
 	// Draw.
 	pad_x, pad_y: u16 = field_pad_x(), FIELD_PAD_Y
@@ -313,7 +315,7 @@ text_edit :: proc(id: string, e: ^Text_Edit, opts: Edit_Opts = {}) -> (res: Edit
 					}) {}
 				}
 				for k in first ..< last {
-					draw_line(&ed, k, show_caret, has_focus, opts.placeholder)
+					draw_edit_line(&ed, k, show_caret, has_focus, opts.placeholder)
 				}
 			}
 		}
@@ -447,12 +449,7 @@ edit_pointer :: proc(ed: ^Editor, vp: clay.BoundingBox, hot, dragging: bool) {
 	at := index_at_x(ed, k, local.x)
 	s := edit_text(e)
 	if mouse_pressed(.Left) && hot {
-		quick := s_edit_clock - e.click_time < 0.4
-		near := abs(input.mouse_x - e.click_pos.x) < 4 && abs(input.mouse_y - e.click_pos.y) < 4
-		e.clicks = e.clicks % 3 + 1 if quick && near else 1
-		e.click_time = s_edit_clock
-		e.click_pos = {input.mouse_x, input.mouse_y}
-		switch e.clicks {
+		switch count_click(&e.click) {
 		case 1:
 			e.caret = at
 			if .Shift not_in input.mods {
@@ -466,7 +463,7 @@ edit_pointer :: proc(ed: ^Editor, vp: clay.BoundingBox, hot, dragging: bool) {
 		e.want_x = nil
 		e.last_kind = .None
 		e.follow = true
-	} else if dragging && e.clicks == 1 {
+	} else if dragging && e.click.count == 1 {
 		if at != e.caret {
 			e.caret = at
 			e.follow = true
@@ -758,6 +755,25 @@ snap_rune :: proc(s: string, i: int) -> int {
 	return i
 }
 
+// A run of quick clicks in one spot: 1, 2 (a word), 3 (a line or paragraph), then 1 again.
+@(private)
+Clicks :: struct {
+	count: int,
+	at:    time.Tick,
+	pos:   [2]f32,
+}
+
+// Count a press into its run.
+@(private)
+count_click :: proc(c: ^Clicks) -> int {
+	quick := c.at != {} && time.duration_seconds(time.tick_since(c.at)) < 0.4
+	near := abs(input.mouse_x - c.pos.x) < 4 && abs(input.mouse_y - c.pos.y) < 4
+	c.count = c.count % 3 + 1 if quick && near else 1
+	c.at = time.tick_now()
+	c.pos = {input.mouse_x, input.mouse_y}
+	return c.count
+}
+
 // 0 space, 1 word (letters, digits, _), 2 punctuation and the rest.
 @(private = "file")
 rune_class :: proc(r: rune) -> int {
@@ -821,8 +837,9 @@ word_right :: proc(s: string, i: int) -> int {
 	return i
 }
 
-// The run of one class around i (the one after i, or before it at the end).
-@(private = "file")
+// The run of one class around i (the one after i, or before it at the end): what a double
+// click selects, in fields and rich text.
+@(private)
 word_at :: proc(s: string, i: int) -> (lo, hi: int) {
 	if len(s) == 0 {
 		return 0, 0
@@ -860,7 +877,7 @@ hard_line_at :: proc(s: string, i: int) -> (lo, hi: int) {
 // --- drawing ---------------------------------------------------------------------------
 
 @(private = "file")
-draw_line :: proc(ed: ^Editor, k: int, show_caret, has_focus: bool, placeholder: string) {
+draw_edit_line :: proc(ed: ^Editor, k: int, show_caret, has_focus: bool, placeholder: string) {
 	e := ed.e
 	s := edit_text(e)
 	l := ed.lines[k]

@@ -45,6 +45,7 @@ Design :: struct {
 	light:      Color_Set,
 }
 
+@(private)
 ROLE_NAMES := [Type_Role]string {
 	.Title   = "title",
 	.Heading = "heading",
@@ -108,11 +109,12 @@ s_design_sets: [Theme_Mode]Color_Set = {
 	.Light = {base = BASE_LIGHT},
 }
 
+// What each role's slot was last loaded from, so applying the same design again
+// (the Design tab, on every edit) neither reloads nor warns again.
 @(private)
 Applied_Font :: struct {
 	face: string, // owned
 	dir:  string, // owned
-	size: u16,
 }
 
 @(private)
@@ -136,7 +138,7 @@ apply_design :: proc(d: Design, mode: Maybe(Theme_Mode) = .Dark, fade: f32 = 0) 
 		.Light = d.light,
 	}
 	for role in Type_Role {
-		apply_font(role, d.fonts[role], d.dir, role_size(theme.typography, role))
+		apply_font(role, d.fonts[role], d.dir)
 	}
 	if m, ok := mode.?; ok {
 		set_palette(design_palette(m), fade)
@@ -148,48 +150,16 @@ design_palette :: proc(mode: Theme_Mode) -> Palette {
 	return palette_of(s_design_sets[mode])
 }
 
-role_size :: proc(t: Typography, role: Type_Role) -> u16 {
-	switch role {
-	case .Title:
-		return t.size_title
-	case .Heading:
-		return t.size_heading
-	case .Body:
-		return t.size_body
-	case .Small:
-		return t.size_small
-	case .Mono:
-		return t.size_mono
-	}
-	return t.size_body
-}
-
-role_font :: proc(t: Typography, role: Type_Role) -> u16 {
-	switch role {
-	case .Title:
-		return t.font_title
-	case .Heading:
-		return t.font_heading
-	case .Body:
-		return t.font_body
-	case .Small:
-		return t.font_small
-	case .Mono:
-		return t.font_mono
-	}
-	return t.font_body
-}
-
 @(private)
-apply_font :: proc(role: Type_Role, face, dir: string, size: u16) {
+apply_font :: proc(role: Type_Role, face, dir: string) {
 	a := &s_applied_fonts[role]
-	id := role_font(theme.typography, role)
-	if a.size == size && a.face == face && a.dir == dir && slot_face(id) != NO_FACE {
+	id := u16(role) // the slot: Typography's font ids are the roles
+	if a.face == face && a.dir == dir && slot_face(id) != NO_FACE {
 		return
 	}
 	delete(a.face)
 	delete(a.dir)
-	a^ = {face = strings.clone(face), dir = strings.clone(dir), size = size}
+	a^ = {face = strings.clone(face), dir = strings.clone(dir)}
 
 	data, path, found := font_source(face, dir)
 	if !found && face != "" {
@@ -197,14 +167,14 @@ apply_font :: proc(role: Type_Role, face, dir: string, size: u16) {
 	}
 	if path != "" {
 		cpath := strings.clone_to_cstring(path, context.temp_allocator)
-		load_font(id, size, cpath)
+		load_font(id, cpath)
 		if slot_face(id) != NO_FACE {
 			return
 		}
 		data = default_font_data()
 	}
 	if len(data) > 0 {
-		load_font_data(id, size, data)
+		load_font_data(id, data)
 	}
 }
 

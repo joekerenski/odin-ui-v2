@@ -4,8 +4,6 @@ import clay "../deps/clay"
 import "core:hash"
 import "core:math"
 import "core:strings"
-import "core:time"
-import "core:unicode"
 import "core:unicode/utf8"
 
 // Rich text: a paragraph of spans in different styles (font, size, color, a box behind it,
@@ -166,10 +164,10 @@ rich_content_width :: proc(id: string) -> f32 {
 	return r.content_w if r != nil else 0
 }
 
-// A laid-out paragraph. Its Custom_Data comes first, so the pointer Clay carries is both.
+// A laid-out paragraph. Clay carries a pointer to `custom`, which points back here.
 @(private)
 Rich_Layout :: struct {
-	using custom: Custom_Data,
+	custom:       Custom,
 	key:          u64,
 	used:         u64, // frame last laid out or drawn
 	text:         string, // the spans' texts, concatenated: frags index into it
@@ -226,9 +224,7 @@ Rich_Selection :: struct {
 	anchor, focus: Rich_Point,
 	active:        bool,
 	dragging:      bool,
-	clicks:        int, // within a run of quick clicks: 1, 2 (word), 3 (paragraph)
-	click_at:      time.Tick,
-	click_pos:     [2]f32,
+	click:         Clicks, // 1, 2 (a word), 3 (the paragraph)
 	claimed:       bool, // a paragraph took this frame's press
 	unclaimed:     bool, // last frame's press landed on no paragraph: clear
 }
@@ -250,7 +246,7 @@ rich_begin_frame :: proc() {
 	for id, k in s_rich_order_prev { s_rich_index[id] = k }
 
 	if s_sel.unclaimed {
-		s_sel = {click_at = s_sel.click_at, click_pos = s_sel.click_pos}
+		s_sel = {click = {at = s_sel.click.at, pos = s_sel.click.pos}}
 	}
 	s_sel.unclaimed = mouse_pressed(.Left) && s_sel.active
 	if !mouse_down(.Left) {
@@ -301,22 +297,18 @@ rich_free :: proc(r: ^Rich_Layout) {
 // word, a triple click the paragraph, Shift+click extends.
 @(private = "file")
 select_press :: proc(id: u32, r: ^Rich_Layout, at: int) {
-	quick := time.duration_seconds(time.tick_since(s_sel.click_at)) < 0.4
-	near := abs(input.mouse_x - s_sel.click_pos.x) < 4 && abs(input.mouse_y - s_sel.click_pos.y) < 4
-	s_sel.clicks = s_sel.clicks % 3 + 1 if quick && near else 1
-	s_sel.click_at = time.tick_now()
-	s_sel.click_pos = {input.mouse_x, input.mouse_y}
+	clicks := count_click(&s_sel.click)
 	s_sel.claimed = true
 	s_sel.unclaimed = false
 	extend := .Shift in input.mods && s_sel.active
 	s_sel.active = true
-	switch s_sel.clicks {
+	switch clicks {
 	case 1:
 		if !extend { s_sel.anchor = {id, at} }
 		s_sel.focus = {id, at}
 		s_sel.dragging = true
 	case 2:
-		lo, hi := word_bounds(r.text, at)
+		lo, hi := word_at(r.text, at)
 		s_sel.anchor, s_sel.focus = {id, lo}, {id, hi}
 	case 3:
 		s_sel.anchor, s_sel.focus = {id, 0}, {id, len(r.text)}
@@ -350,30 +342,6 @@ selection_in :: proc(id: u32, index, n: int) -> (int, int) {
 	s := lo.at if index == lo.index else 0
 	e := hi.at if index == hi.index else n
 	return s, e
-}
-
-// The word (letters, digits, '_') or other run around byte `at`.
-@(private = "file")
-word_bounds :: proc(s: string, at: int) -> (int, int) {
-	is_word :: proc(r: rune) -> bool { return unicode.is_letter(r) || unicode.is_digit(r) || r == '_' }
-	at := clamp(at, 0, len(s))
-	if at == len(s) && at > 0 { at -= 1 }
-	if len(s) == 0 { return 0, 0 }
-	r0, _ := utf8.decode_rune_in_string(s[at:])
-	kind := is_word(r0)
-	lo := at
-	for lo > 0 {
-		r, n := utf8.decode_last_rune_in_string(s[:lo])
-		if is_word(r) != kind || r == '\n' { break }
-		lo -= n
-	}
-	hi := at
-	for hi < len(s) {
-		r, n := utf8.decode_rune_in_string(s[hi:])
-		if is_word(r) != kind || r == '\n' { break }
-		hi += n
-	}
-	return lo, hi
 }
 
 // The link under a point in the paragraph, 0 for none.
@@ -457,7 +425,7 @@ rich_layout :: proc(id: u32, spans: []Span, width, line: f32, opts: Rich_Opts) -
 	r := s_rich[id]
 	if r == nil {
 		r = new(Rich_Layout)
-		r.kind = .Rich
+		r.custom = r
 		s_rich[id] = r
 	}
 	r.used = s_rich_frame

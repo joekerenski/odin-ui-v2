@@ -349,3 +349,9 @@ hsv_to_rgb :: proc(h, s, v: f32, alpha: f32 = 255) -> Color {
 	}
 	return {(r + m) * 255, (g + m) * 255, (b + m) * 255, alpha}
 }
+
+@(private)
+ease_in_out_cubic :: proc(t: f32) -> f32 {
+	t := math.clamp(t, 0, 1)
+	return 4 * t * t * t if t < 0.5 else 1 - math.pow(-2 * t + 2, 3) * 0.5
+}

@@ -76,45 +76,55 @@ drag_value_x :: proc(id: string, value, lo, hi: f32, inset: f32 = 0) -> f32 {
 	return lo + t * (hi - lo)
 }
 
-// --- Clay Custom primitives -------------------------------------------------
+// --- Clay Custom elements ---------------------------------------------------
 //
-// Geometry is *relative to the command's bounding box* so floating children
-// clip with their parent (panel fold, scroll). Stored in a frame arena so
-// pointers stay valid from layout → render. Cleared at begin_layout.
+// What a Custom element draws, in its box and Clay's draw order, clipped like
+// any element. Clay carries a pointer to a Custom; geometry is relative to
+// the element's box, so it moves and clips with it.
+//
+// A host draws its own element with a Custom_Draw it keeps alive for the
+// frame (in a struct of its own):
+//
+//   board.custom = ui.Custom_Draw{draw = board_draw, data = &board}
+//   if clay.UI(clay.ID("Board"))({layout = ..., custom = {customData = &board.custom}}) {}
+//
+// `draw` gets the data and the element's box, in layout units, after the
+// shapes queued so far are drawn (so it may use raylib too).
 
-Custom_Kind :: enum u8 {
-	// Triangle; a/b/c are offsets from the box's top-left.
-	Triangle,
-	// Horizontal gradient through `stops`, as a pill (ends rounded to half
-	// the height).
-	Gradient,
-	// A paragraph of rich text: the data is a Rich_Layout (rich.odin).
-	Rich,
-	// The host draws it: `draw` is called with the data and the element's box, in
-	// layout units, clipped like the element. For a host's own Custom_Data, put it
-	// first in a struct of its own (as Rich_Layout does) and the pointer is both.
-	Draw,
+Custom :: union {
+	Custom_Draw,
+	Custom_Triangle,
+	Custom_Gradient,
+	^Rich_Layout,
 }
 
+Custom_Draw :: struct {
+	draw: proc(data: rawptr, box: Region_Box),
+	data: rawptr,
+}
+
+// Corners as offsets from the box's top-left.
+@(private)
+Custom_Triangle :: struct {
+	a, b, c: [2]f32,
+	color:   Color,
+}
+
+// A horizontal gradient through the stops, as a pill.
+@(private)
+Custom_Gradient :: struct {
+	stops: [GRADIENT_STOPS]Color,
+	count: u8,
+}
+
+@(private)
 GRADIENT_STOPS :: 7
 
-Custom_Data :: struct {
-	kind:    Custom_Kind,
-	color:   Color,
-	// Triangle only — offsets from bounding-box origin.
-	a, b, c: [2]f32,
-	// Gradient only.
-	stops:   [GRADIENT_STOPS]Color,
-	count:   u8,
-	// Draw only.
-	draw:    proc(data: ^Custom_Data, box: clay.BoundingBox),
-}
-
-// Backing store for Custom payloads. Capacity is reserved up front and only
+// The ui's own Customs for this frame. Capacity is reserved up front and only
 // ever cleared (never shrunk), so pointers handed to Clay stay valid for the
 // whole frame — a mid-frame realloc would dangle them (use-after-free).
 @(private)
-s_custom: [dynamic]Custom_Data
+s_custom: [dynamic]Custom
 
 CUSTOM_RESERVE :: 256
 
@@ -140,7 +150,7 @@ custom_begin_frame :: proc() {
 }
 
 @(private)
-custom_push :: proc(d: Custom_Data) -> rawptr {
+custom_push :: proc(d: Custom) -> rawptr {
 	if len(s_custom) >= cap(s_custom) {
 		// Growing here would invalidate pointers already handed to Clay this
 		// frame. Drop the decoration instead (raise CUSTOM_RESERVE if hit).
@@ -156,7 +166,8 @@ custom_push :: proc(d: Custom_Data) -> rawptr {
 // a knob still hangs past its track's ends but scrolls out under the edge.
 // A plain element whose corners are half its size: the renderer draws round
 // corners exactly, so a circle needs nothing Custom.
-custom_circle_at :: proc(id, parent_id: string, cx, cy, r: f32, color: Color, index: u32 = 0) {
+@(private)
+circle_at :: proc(id, parent_id: string, cx, cy, r: f32, color: Color, index: u32 = 0) {
 	parent, ok := element_box(parent_id)
 	if !ok {
 		return
@@ -186,7 +197,8 @@ custom_circle_at :: proc(id, parent_id: string, cx, cy, r: f32, color: Color, in
 
 // Filled triangle as a floating child. Points are absolute layout coords;
 // converted to parent-relative offsets for the Custom payload.
-custom_triangle_at :: proc(id, parent_id: string, a, b, c: [2]f32, color: Color, index: u32 = 0) {
+@(private)
+triangle_at :: proc(id, parent_id: string, a, b, c: [2]f32, color: Color, index: u32 = 0) {
 	parent, ok := element_box(parent_id)
 	if !ok {
 		return
@@ -196,12 +208,11 @@ custom_triangle_at :: proc(id, parent_id: string, a, b, c: [2]f32, color: Color,
 	max_x := max(a.x, b.x, c.x)
 	max_y := max(a.y, b.y, c.y)
 	// Local offsets inside the floating element's own box.
-	ptr := custom_push({
-		kind  = .Triangle,
-		color = color,
+	ptr := custom_push(Custom_Triangle{
 		a     = {a.x - min_x, a.y - min_y},
 		b     = {b.x - min_x, b.y - min_y},
 		c     = {c.x - min_x, c.y - min_y},
+		color = color,
 	})
 	if ptr == nil {
 		return
@@ -230,29 +241,23 @@ custom_triangle_at :: proc(id, parent_id: string, a, b, c: [2]f32, color: Color,
 }
 
 // Draw a Clay .Custom command; render calls this.
-// Geometry is relative to cmd.boundingBox.
 @(private)
 dispatch_custom :: proc(cmd: ^clay.RenderCommand) {
-	data := cast(^Custom_Data)cmd.renderData.custom.customData
-	if data == nil {
+	c := cast(^Custom)cmd.renderData.custom.customData
+	if c == nil {
 		return
 	}
 	box := cmd.boundingBox
-	switch data.kind {
-	case .Triangle:
-		draw_triangle(
-			{box.x + data.a.x, box.y + data.a.y},
-			{box.x + data.b.x, box.y + data.b.y},
-			{box.x + data.c.x, box.y + data.c.y},
-			data.color,
-		)
-	case .Gradient:
-		draw_gradient_pill(box, data.stops[:data.count])
-	case .Rich:
-		draw_rich((^Rich_Layout)(data), box)
-	case .Draw:
+	switch &d in c^ {
+	case Custom_Draw:
 		// The host may draw with raylib: shapes so far go first.
 		flush_shapes()
-		if data.draw != nil { data.draw(data, box) }
+		if d.draw != nil { d.draw(d.data, box) }
+	case Custom_Triangle:
+		draw_triangle({box.x + d.a.x, box.y + d.a.y}, {box.x + d.b.x, box.y + d.b.y}, {box.x + d.c.x, box.y + d.c.y}, d.color)
+	case Custom_Gradient:
+		draw_gradient_pill(box, d.stops[:d.count])
+	case ^Rich_Layout:
+		draw_rich(d, box)
 	}
 }

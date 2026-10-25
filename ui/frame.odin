@@ -159,9 +159,6 @@ shutdown :: proc() {
 	} else when ODIN_OS == .Linux {
 		wayland_stop()
 	}
-	for &f in fonts {
-		delete(f.path)
-	}
 	delete(fonts)
 	fonts = nil
 	glyphs_teardown()
@@ -332,7 +329,7 @@ end_layout :: proc() -> clay.ClayArray(clay.RenderCommand) {
 begin_draw :: proc() {
 	rl.BeginDrawing()
 	perf_draw_begin()
-	rl.ClearBackground(to_rl_color(theme.bg))
+	rl.ClearBackground(transmute(rl.Color)rgba8(theme.bg))
 	shapes_frame_begin()
 	rlgl.PushMatrix()
 	rlgl.Scalef(zoom, zoom, 1)
@@ -394,12 +391,12 @@ begin_clip :: proc(id: string, index: u32 = 0) -> bool {
 	if !ok {
 		return false
 	}
-	set_scissor(box)
+	shapes_clip(box)
 	return true
 }
 
 end_clip :: proc() {
-	end_scissor()
+	shapes_clip(nil)
 }
 
 // A press over the element this frame. Hit-tested by Clay like `hovered`, so
