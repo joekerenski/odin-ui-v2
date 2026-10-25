@@ -198,8 +198,8 @@ s_sh: struct {
 
 @(private)
 shapes_setup :: proc() {
-	// raylib's own loader: the vendored rlgl bindings predate raylib 6's
-	// renamed shader calls (rlLoadShaderCode is gone from the library).
+	// raylib's loader, which also falls back to its default shader on an
+	// error: the check below.
 	s_sh.shader = rl.LoadShaderFromMemory(SHAPE_VS, SHAPE_FS)
 	if s_sh.shader.id == 0 || s_sh.shader.id == rlgl.GetShaderIdDefault() {
 		fmt.eprintln("ui: the shape shader did not compile; the UI will not draw")

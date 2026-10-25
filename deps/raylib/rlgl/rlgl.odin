@@ -139,6 +139,7 @@ when ODIN_OS == .Windows {
 		"system:Cocoa.framework",
 		"system:OpenGL.framework",
 		"system:IOKit.framework",
+		"system:QuartzCore.framework", // GLFW 3.4+ (raylib after 6.0) makes a CAMetalLayer
 	}
 } else {
 	foreign import lib "system:raylib"
@@ -274,10 +275,11 @@ VertexBuffer :: struct {
 
 	vertices:  [^]f32,                   // Vertex position (XYZ - 3 components per vertex) (shader-location = 0)
 	texcoords: [^]f32,                   // Vertex texture coordinates (UV - 2 components per vertex) (shader-location = 1)
+	normals:   [^]f32,                   // Vertex normal (XYZ - 3 components per vertex) (shader-location = 2)
 	colors:    [^]u8,                    // Vertex colors (RGBA - 4 components per vertex) (shader-location = 3)
 	indices:   [^]VertexBufferIndexType, // Vertex indices (in case vertex data comes indexed) (6 indices per quad)
 	vaoId:     c.uint,                   // OpenGL Vertex Array Object id
-	vboId:     [4]c.uint,                // OpenGL Vertex Buffer Objects id (4 types of vertex data)
+	vboId:     [5]c.uint,                // OpenGL Vertex Buffer Objects id (5 types of vertex data)
 }
 
 // Draw call type
@@ -373,12 +375,12 @@ foreign lib {
 	Rotatef             :: proc(angleDeg: f32, x, y, z: f32) --- // Multiply the current matrix by a rotation matrix
 	Scalef              :: proc(x, y, z: f32) ---                // Multiply the current matrix by a scaling matrix
 	MultMatrixf         :: proc(matf: [^]f32) ---                // Multiply the current matrix by another matrix
-	Frustum             :: proc(left, right, bottom, top, znear, zfar: f64) ---
-	Ortho               :: proc(left, right, bottom, top, znear, zfar: f64) ---
+	Frustum             :: proc(left, right, bottom, top, znear, zfar: f32) ---
+	Ortho               :: proc(left, right, bottom, top, znear, zfar: f32) ---
 	Viewport            :: proc(x, y, width, height: c.int) ---  // Set the viewport area
-	SetClipPlanes       :: proc(near, far: f64) ---              // Set clip planes distances
-	GetCullDistanceNear :: proc() -> f64 ---                     // Get cull plane distance near
-	GetCullDistanceFar  :: proc() -> f64 ---                     // Get cull plane distance far
+	SetClipPlanes       :: proc(near, far: f32) ---              // Set clip planes distances
+	GetCullDistanceNear :: proc() -> f32 ---                     // Get cull plane distance near
+	GetCullDistanceFar  :: proc() -> f32 ---                     // Get cull plane distance far
 
 	//------------------------------------------------------------------------------------
 	// Functions Declaration - Vertex level operations
@@ -421,7 +423,7 @@ foreign lib {
 	EnableTextureCubemap  :: proc(id: c.uint) ---                             // Enable texture cubemap
 	DisableTextureCubemap :: proc() ---                                       // Disable texture cubemap
 	TextureParameters     :: proc(id: c.uint, param: c.int, value: c.int) --- // Set texture parameters (filter, wrap)
-	CubemapParameters     :: proc(id: i32, param: c.int, value: c.int) ---    // Set cubemap parameters (filter, wrap)
+	CubemapParameters     :: proc(id: c.uint, param: c.int, value: c.int) ---    // Set cubemap parameters (filter, wrap)
 
 	// Shader state
 	EnableShader  :: proc(id: c.uint) ---                                       // Enable shader program
@@ -430,6 +432,10 @@ foreign lib {
 	// Framebuffer state
 	EnableFramebuffer  :: proc(id: c.uint) ---                                  // Enable render texture (fbo)
 	DisableFramebuffer :: proc() ---                                            // Disable render texture (fbo), return to default framebuffer
+	GetActiveFramebuffer :: proc() -> c.uint ---                                // Get the currently active render texture (fbo), 0 for default framebuffer
+	BindFramebuffer    :: proc(target, framebuffer: c.uint) ---                 // Bind framebuffer (FBO)
+	CopyFramebuffer    :: proc(x, y, width, height: c.int, format: c.int, pixels: rawptr) --- // Copy framebuffer pixel data to internal buffer
+	ResizeFramebuffer  :: proc(width, height: c.int) ---                        // Resize internal framebuffer
 	ActiveDrawBuffers  :: proc(count: c.int) ---                                // Activate multiple draw color buffers
 	BlitFramebuffer	 :: proc(srcX, srcY, srcWidth, srcHeight, dstX, dstY, dstWidth, dstHeight, bufferMask: c.int) --- // Blit active framebuffer to main framebuffer
 
@@ -447,7 +453,11 @@ foreign lib {
 	DisableScissorTest     :: proc() ---                           // Disable scissor test
 	Scissor                :: proc(x, y, width, height: c.int) --- // Scissor test
 	EnableWireMode         :: proc() ---                           // Enable wire mode
-	EnablePointMode        :: proc() --- 							 // Enable point mode
+	EnablePointMode        :: proc() ---                           // Enable point mode
+	DisablePointMode       :: proc() ---                           // Disable point mode
+	SetPointSize           :: proc(size: f32) ---                  // Set the point drawing size
+	GetPointSize           :: proc() -> f32 ---                    // Get the point drawing size
+	ColorMask              :: proc(r, g, b, a: bool) ---           // Color mask control
 	DisableWireMode        :: proc() ---                           // Disable wire and point modes
 	SetLineWidth           :: proc(width: f32) ---                 // Set the line drawing width
 	GetLineWidth           :: proc() -> f32 ---                    // Get the line drawing width
@@ -494,7 +504,7 @@ foreign lib {
 	DrawRenderBatch       :: proc(batch: ^RenderBatch) ---                              // Draw render batch data (Update->Draw->Reset)
 	SetRenderBatchActive  :: proc(batch: ^RenderBatch) ---                              // Set the active render batch for rlgl (NULL for default internal)
 	DrawRenderBatchActive :: proc() ---                                                 // Update and draw internal render batch
-	CheckRenderBatchLimit :: proc(vCount: c.int) -> c.int ---                           // Check internal buffer overflow for a given number of vertex
+	CheckRenderBatchLimit :: proc(vCount: c.int) -> bool ---                              // Check internal buffer overflow for a given number of vertex
 
 	SetTexture :: proc(id: c.uint) --- // Set current texture for render batch and check buffers limits
 
@@ -519,7 +529,7 @@ foreign lib {
 	// Textures management
 	LoadTexture         :: proc(data: rawptr, width, height: c.int, format: c.int, mipmapCount: c.int) -> c.uint ---        // Load texture in GPU
 	LoadTextureDepth    :: proc(width, height: c.int, useRenderBuffer: bool) -> c.uint ---                                  // Load depth texture/renderbuffer (to be attached to fbo)
-	LoadTextureCubemap  :: proc(data: rawptr, size: c.int, format: c.int) -> c.uint ---                                     // Load texture cubemap
+	LoadTextureCubemap  :: proc(data: rawptr, size: c.int, format: c.int, mipmapCount: c.int) -> c.uint ---                                   // Load texture cubemap
 	UpdateTexture       :: proc(id: c.uint, offsetX, offsetY: c.int, width, height: c.int, format: c.int, data: rawptr) --- // Update GPU texture with new data
 	GetGlTextureFormats :: proc(format: c.int, glInternalFormat, glFormat, glType: ^c.uint) ---                             // Get OpenGL internal formats
 	GetPixelFormatName  :: proc(format: c.uint) -> cstring ---                                                              // Get name string for pixel format
@@ -535,20 +545,21 @@ foreign lib {
 	UnloadFramebuffer   :: proc(id: c.uint) ---                                                               // Delete framebuffer from GPU
 
 	// Shaders management
-	LoadShaderCode      :: proc(vsCode, fsCode: cstring) -> c.uint ---                                // Load shader from code strings
-	CompileShader       :: proc(shaderCode: cstring, type: c.int) -> c.uint ---                       // Compile custom shader and return shader id (type: VERTEX_SHADER, FRAGMENT_SHADER, COMPUTE_SHADER)
-	LoadShaderProgram   :: proc(vShaderId, fShaderId: c.uint) -> c.uint ---                           // Load custom shader program
+	LoadShader          :: proc(code: cstring, type: c.int) -> c.uint ---                             // Load (compile) shader and return shader id (type: VERTEX_SHADER, FRAGMENT_SHADER, COMPUTE_SHADER)
+	LoadShaderProgram   :: proc(vsCode, fsCode: cstring) -> c.uint ---                                // Load shader from code strings
+	LoadShaderProgramEx :: proc(vsId, fsId: c.uint) -> c.uint ---                                     // Load shader program, using already loaded shader ids
 	UnloadShader        :: proc(id: c.uint) ---                                                       // Unload shader, loaded with rlLoadShader()
 	UnloadShaderProgram :: proc(id: c.uint) ---                                                       // Unload shader program
 	GetLocationUniform  :: proc(shaderId: c.uint, uniformName: cstring) -> c.int ---                  // Get shader location uniform
 	GetLocationAttrib   :: proc(shaderId: c.uint, attribName: cstring) -> c.int ---                   // Get shader location attribute
 	SetUniform          :: proc(locIndex: c.int, value: rawptr, uniformType: c.int, count: c.int) --- // Set shader value uniform
 	SetUniformMatrix    :: proc(locIndex: c.int, mat: Matrix) ---                                     // Set shader value matrix
+	SetUniformMatrices  :: proc(locIndex: c.int, mat: [^]Matrix, count: c.int) ---                    // Set shader value matrices
 	SetUniformSampler   :: proc(locIndex: c.int, textureId: c.uint) ---                               // Set shader value sampler
 	SetShader           :: proc(id: c.uint, locs: [^]c.int) ---                                       // Set shader currently active (id and locations)
 
 	// Compute shader management
-	LoadComputeShaderProgram :: proc(shaderId: c.uint) -> c.uint ---     // Load compute shader program
+	LoadShaderProgramCompute :: proc(csId: c.uint) -> c.uint ---         // Load compute shader program
 	ComputeShaderDispatch    :: proc(groupX, groupY, groupZ: c.uint) --- // Dispatch compute shader (equivalent to *draw* for graphics pipeline)
 
 	// Shader buffer storage object management (ssbo)

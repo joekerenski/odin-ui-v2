@@ -1,6 +1,6 @@
 # odin-ui-v2
 
-Clay layout, raylib drawing, one window loop. Raylib is 6.0: the Odin compiler's bindings, vendored in `deps/raylib` with a Linux build that runs natively on Wayland (see [deps/raylib/README.md](deps/raylib/README.md)). Clay is the bindings and static lib from [nicbarker/clay](https://github.com/nicbarker/clay) `e6cc369`.
+Clay layout, raylib drawing, one window loop. raylib is master at `debc1f6` (6.5-dev, after 6.2), vendored in `deps/raylib` with bindings checked against its headers and a Linux build that runs natively on Wayland (see [deps/raylib/README.md](deps/raylib/README.md)). Clay is [nicbarker/clay](https://github.com/nicbarker/clay) `e6cc369`, its current head: the bindings plus static libs built by `deps/clay/build.sh`.
 
 The app has three tabs under a top bar. **Graph** is a force-directed graph: nodes repel, edges are springs, a weak pull keeps the cloud on the canvas, and the side panel drives the model. **Showcase** is a scrollable column of cards with every widget, a place to try things out ([app/showcase.odin](app/showcase.odin)); `./run.sh --showcase` starts there. **Design** edits the look and feel live and saves it as a design file (see [Designs](#designs)); `./run.sh --lab` starts there.
 

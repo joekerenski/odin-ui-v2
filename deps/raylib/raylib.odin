@@ -128,15 +128,16 @@ when ODIN_OS == .Windows {
 		"system:Cocoa.framework",
 		"system:OpenGL.framework",
 		"system:IOKit.framework",
+		"system:QuartzCore.framework", // GLFW 3.4+ (raylib after 6.0) makes a CAMetalLayer
 	}
 } else {
 	foreign import lib "system:raylib"
 }
 
 VERSION_MAJOR :: 6
-VERSION_MINOR :: 0
+VERSION_MINOR :: 5
 VERSION_PATCH :: 0
-VERSION :: "6.0"
+VERSION :: "6.5-dev"
 
 PI :: 3.14159265358979323846
 DEG2RAD :: PI/180.0
@@ -1109,6 +1110,7 @@ foreign lib {
 	FileTextFindIndex       :: proc(fileName: cstring, search: cstring) -> c.int ---                           // Find text in existing file
 	FileExists              :: proc(fileName: cstring) -> bool ---                                             // Check if file exists
 	DirectoryExists         :: proc(dirPath: cstring) -> bool ---                                              // Check if a directory path exists
+	IsFileHidden            :: proc(filePath: cstring) -> bool ---                                             // Check if file path (file or directory) is hidden by OS
 	IsFileExtension         :: proc(fileName, ext: cstring) -> bool ---                                        // Check file extension (including point: .png, .wav)
 	GetFileLength           :: proc(fileName: cstring) -> c.int ---                                            // Get file length in bytes (NOTE: GetFileSize() conflicts with windows.h)
 	GetFileModTime          :: proc(fileName: cstring) -> c.long ---                                           // Get file modification time (last write time)
@@ -1120,8 +1122,10 @@ foreign lib {
 	GetWorkingDirectory     :: proc() -> cstring ---                                                           // Get current working directory (uses static string)
 	GetApplicationDirectory :: proc() -> cstring ---                                                           // Get the directory of the running application (uses static string)
 	MakeDirectory           :: proc(dirPath: cstring) -> c.int ---                                             // Create directories (including full path requested), returns 0 on success
-	ChangeDirectory         :: proc(dir: cstring) -> bool ---                                                  // Change working directory, return true on success
+	ChangeDirectory         :: proc(dir: cstring) -> c.int ---                                                 // Change working directory, returns 0 on success
 	IsPathFile              :: proc(path: cstring) -> bool ---                                                 // Check if a given path is a file or a directory
+	IsPathDirectory         :: proc(path: cstring) -> bool ---                                                 // Check if provided path points to a directory
+	IsPathAbsolute          :: proc(path: cstring) -> bool ---                                                 // Check if provided path is an absolute path
 	IsFileNameValid         :: proc(fileName: cstring) -> bool ---                                             // Check if fileName is valid for the platform/OS
 	LoadDirectoryFiles      :: proc(dirPath: cstring) -> FilePathList ---                                      // Load directory filepaths
 	LoadDirectoryFilesEx    :: proc(basePath: cstring, filter: cstring, scanSubdirs: bool) -> FilePathList --- // Load directory filepaths with extension filtering and recursive directory scan. Use 'DIR' in the filter string to include directories in the result
@@ -1137,7 +1141,7 @@ foreign lib {
 	CompressData     :: proc(data: rawptr,     dataSize: c.int,     compDataSize: ^c.int) -> [^]byte ---       // Compress data (DEFLATE algorithm), memory must be MemFree()
 	DecompressData   :: proc(compData: rawptr, compDataSize: c.int, dataSize:     ^c.int) -> [^]byte ---       // Decompress data (DEFLATE algorithm), memory must be MemFree()
 	EncodeDataBase64 :: proc(data: rawptr,     dataSize: c.int,     outputSize:   ^c.int) -> cstring ---       // Encode data to Base64 string (includes NULL terminator), memory must be MemFree()
-	DecodeDataBase64 :: proc(data: rawptr,     outputSize: ^c.int) -> cstring ---                              // Decode Base64 string (expected NULL terminated), memory must be MemFree()
+	DecodeDataBase64 :: proc(text: cstring,    outputSize: ^c.int) -> [^]u8 ---                                // Decode Base64 string (expected NULL terminated), memory must be MemFree()
 	ComputeCRC32     :: proc(data: rawptr,     dataSize: c.int) -> c.uint ---                                  // Compute CRC32 hash code
 	ComputeMD5       :: proc(data: rawptr,     dataSize: c.int) -> [^]c.uint ---                               // Compute MD5 hash code, returns static int[4] (16 bytes)
 	ComputeSHA1      :: proc(data: rawptr,     dataSize: c.int) -> [^]c.uint ---                               // Compute SHA1 hash code, returns static int[5] (20 bytes)
@@ -1216,6 +1220,7 @@ foreign lib {
 
 	SetGesturesEnabled :: proc(flags: Gestures) ---            // Enable a set of gestures using flags
 	// IsGestureDetected is declared near the bottom
+	GetGestureDetected     :: proc() -> c.int ---              // Get latest detected gesture
 	GetGestureHoldDuration :: proc() -> f32 ---                // Get gesture hold time in seconds
 	GetGestureDragVector   :: proc() -> Vector2 ---            // Get gesture drag vector
 	GetGestureDragAngle    :: proc() -> f32 ---                // Get gesture drag angle
@@ -1272,14 +1277,18 @@ foreign lib {
 	DrawCircleGradient          :: proc(center: Vector2, radius: f32, inner, outer: Color) ---                                                        // Draw a gradient-filled circle
 	DrawCircleSector            :: proc(center: Vector2, radius: f32, startAngle, endAngle: f32, segments: c.int, color: Color) ---                   // Draw a piece of a circle
 	DrawCircleSectorLines       :: proc(center: Vector2, radius: f32, startAngle, endAngle: f32, segments: c.int, color: Color) ---                   // Draw circle sector outline
+	DrawCircleSectorLinesEx     :: proc(center: Vector2, radius: f32, startAngle, endAngle: f32, segments: c.int, thick: f32, color: Color) ---       // Draw circle sector outline with thickness
 	DrawCircleLines             :: proc(centerX, centerY: c.int, radius: f32, color: Color) ---                                                       // Draw circle outline
+	DrawCircleLinesEx           :: proc(center: Vector2, radius: f32, thick: f32, color: Color) ---                                                   // Draw circle outline with line thickness
 	DrawCircleLinesV            :: proc(center: Vector2, radius: f32, color: Color) ---                                                               // Draw circle outline (Vector version)
 	DrawEllipse                 :: proc(centerX, centerY: c.int, radiusH, radiusV: f32, color: Color) ---                                             // Draw ellipse
 	DrawEllipseV                :: proc(center: Vector2, radiusH, radiusV: f32, color: Color) ---                                                     // Draw ellipse (Vector version)
 	DrawEllipseLines            :: proc(centerX, centerY: c.int, radiusH, radiusV: f32, color: Color) ---                                             // Draw ellipse outline
 	DrawEllipseLinesV           :: proc(center: Vector2, radiusH, radiusV: f32, color: Color) ---                                                     // Draw ellipse outline (Vector version)
+	DrawEllipseLinesEx          :: proc(center: Vector2, radiusH, radiusV: f32, thick: f32, color: Color) ---                                         // Draw ellipse outline with line thickness
 	DrawRing                    :: proc(center: Vector2, innerRadius, outerRadius: f32, startAngle, endAngle: f32, segments: c.int, color: Color) --- // Draw ring
 	DrawRingLines               :: proc(center: Vector2, innerRadius, outerRadius: f32, startAngle, endAngle: f32, segments: c.int, color: Color) --- // Draw ring outline
+	DrawRingLinesEx             :: proc(center: Vector2, innerRadius, outerRadius: f32, startAngle, endAngle: f32, segments: c.int, thick: f32, color: Color) --- // Draw ring outline with line thickness
 	DrawRectangle               :: proc(posX, posY: c.int, width, height: c.int, color: Color) ---                                                    // Draw a color-filled rectangle
 	DrawRectangleV              :: proc(position: Vector2, size: Vector2, color: Color) ---                                                           // Draw a color-filled rectangle (Vector version)
 	DrawRectangleRec            :: proc(rec: Rectangle, color: Color) ---                                                                             // Draw a color-filled rectangle
@@ -1294,6 +1303,8 @@ foreign lib {
 	DrawRectangleRoundedLinesEx :: proc(rec: Rectangle, roundness: f32, segments: c.int, lineThick: f32, color: Color) ---                            // Draw rectangle with rounded edges outline
 	DrawTriangle                :: proc(v1, v2, v3: Vector2, color: Color) ---                                                                        // Draw a color-filled triangle (vertex in counter-clockwise order!)
 	DrawTriangleLines           :: proc(v1, v2, v3: Vector2, color: Color) ---                                                                        // Draw triangle outline (vertex in counter-clockwise order!)
+	DrawTriangleLinesEx         :: proc(v1, v2, v3: Vector2, thick: f32, color: Color) ---                                                            // Draw triangle outline with line thickness, counter-clockwise vertex order
+	DrawTriangleGradient        :: proc(v1, v2, v3: Vector2, c1, c2, c3: Color) ---                                                                   // Draw triangle with interpolated colors, counter-clockwise vertex/color order
 	DrawTriangleFan             :: proc(points: [^]Vector2, pointCount: c.int, color: Color) ---                                                      // Draw a triangle fan defined by points (first vertex is the center)
 	DrawTriangleStrip           :: proc(points: [^]Vector2, pointCount: c.int, color: Color) ---                                                      // Draw a triangle strip defined by points
 	DrawPoly                    :: proc(center: Vector2, sides: c.int, radius: f32, rotation: f32, color: Color) ---                                  // Draw a regular polygon (Vector version)
@@ -1318,7 +1329,7 @@ foreign lib {
 	GetSplinePointLinear  	  :: proc(startPos, endPos: Vector2, t: f32) -> Vector2 ---    // Get (evaluate) spline point: Linear
 	GetSplinePointBasis 	  :: proc(p1, p2, p3, p4: Vector2, t: f32) -> Vector2 ---      // Get (evaluate) spline point: B-Spline
 	GetSplinePointCatmullRom  :: proc(p1, p2, p3, p4: Vector2, t: f32) -> Vector2 ---      // Get (evaluate) spline point: Catmull-Rom
-	GetSplinePointBezierQuad  :: proc(p1, c2, p3: Vector2, t: f32) -> Vector2 ---          // Get (evaluate) spline point: Quadratic Bezier
+	GetSplinePointBezierQuadratic :: proc(p1, c2, p3: Vector2, t: f32) -> Vector2 ---      // Get (evaluate) spline point: Quadratic Bezier
 	GetSplinePointBezierCubic :: proc(p1, c2, c3, p4: Vector2, t: f32) -> Vector2 ---      // Get (evaluate) spline point: Cubic Bezier
 
 	// Basic shapes collision detection functions
@@ -1396,7 +1407,7 @@ foreign lib {
 	ImageColorTint        :: proc(image: ^Image, color: Color) ---                                                              // Modify image color: tint
 	ImageColorInvert      :: proc(image: ^Image) ---                                                                            // Modify image color: invert
 	ImageColorGrayscale   :: proc(image: ^Image) ---                                                                            // Modify image color: grayscale
-	ImageColorContrast    :: proc(image: ^Image, contrast: f32) ---                                                             // Modify image color: contrast (-100 to 100)
+	ImageColorContrast    :: proc(image: ^Image, contrast: c.int) ---                                                           // Modify image color: contrast (-100 to 100)
 	ImageColorBrightness  :: proc(image: ^Image, brightness: c.int) ---                                                         // Modify image color: brightness (-255 to 255)
 	ImageColorReplace     :: proc(image: ^Image, color, replace: Color) ---                                                     // Modify image color: replace color
 	LoadImageColors       :: proc(image: Image) -> [^]Color ---                                                                 // Load color data from image as a Color array (RGBA - 32bit)
@@ -1415,22 +1426,31 @@ foreign lib {
 	ImageDrawLine           :: proc(dst: ^Image, startPosX, startPosY, endPosX, endPosY: c.int, color: Color) ---                            // Draw line within an image
 	ImageDrawLineV          :: proc(dst: ^Image, start, end: Vector2, color: Color) ---                                                      // Draw line within an image (Vector version)
 	ImageDrawLineEx         :: proc(dst: ^Image, start, end: Vector2, thick: c.int, color: Color) ---                                        // Draw a line defining thickness within an image
+	ImageDrawLineStrip      :: proc(dst: ^Image, points: [^]Vector2, pointCount: c.int, color: Color) ---                                    // Draw a lines sequence within an image
 	ImageDrawCircle         :: proc(dst: ^Image, centerX, centerY: c.int, radius: c.int, color: Color) ---                                   // Draw a filled circle within an image
 	ImageDrawCircleV        :: proc(dst: ^Image, center: Vector2, radius: c.int, color: Color) ---                                           // Draw a filled circle within an image (Vector version)
 	ImageDrawCircleLines    :: proc(dst: ^Image, centerX, centerY: c.int, radius: c.int, color: Color) ---                                   // Draw circle outline within an image
+	ImageDrawCircleGradient :: proc(dst: ^Image, center: Vector2, radius: f32, inner, outer: Color) ---                                    // Draw a gradient-filled circle within an image
 	ImageDrawCircleLinesV   :: proc(dst: ^Image, center: Vector2, radius: c.int, color: Color) ---                                           // Draw circle outline within an image (Vector version)
 	ImageDrawRectangle      :: proc(dst: ^Image, posX, posY: c.int, width, height: c.int, color: Color) ---                                  // Draw rectangle within an image
 	ImageDrawRectangleV     :: proc(dst: ^Image, position, size: Vector2, color: Color) ---                                                  // Draw rectangle within an image (Vector version)
 	ImageDrawRectangleRec   :: proc(dst: ^Image, rec: Rectangle, color: Color) ---                                                           // Draw rectangle within an image
-	ImageDrawRectangleLines :: proc(dst: ^Image, rec: Rectangle, thick: c.int, color: Color) ---                                             // Draw rectangle lines within an image
+	ImageDrawRectanglePro   :: proc(dst: ^Image, rec: Rectangle, origin: Vector2, rotation: f32, color: Color) ---                            // Draw a color-filled rectangle with pro parameters within an image
+	ImageDrawRectangleGradientEx :: proc(dst: ^Image, rec: Rectangle, col1, col2, col3, col4: Color) ---                                    // Draw rectangle with gradient colors within an image, counter-clockwise color order
+	ImageDrawRectangleLines :: proc(dst: ^Image, posX, posY: c.int, width, height: c.int, color: Color) ---                                  // Draw rectangle lines within an image
+	ImageDrawRectangleLinesEx :: proc(dst: ^Image, rec: Rectangle, thick: c.int, color: Color) ---                                           // Draw rectangle lines within an image with line thickness
 	ImageDrawTriangle       :: proc(dst: ^Image, v1, v2, v3: Vector2, color: Color) ---                                                      // Draw triangle within an image
-	ImageDrawTriangleEx     :: proc(dst: ^Image, v1, v2, v3: Vector2, c1, c2, c3: Color) ---                                                 // Draw triangle with interpolated colors within an image
+	ImageDrawTriangleGradient :: proc(dst: ^Image, v1, v2, v3: Vector2, c1, c2, c3: Color) ---                                               // Draw triangle with interpolated colors within an image
 	ImageDrawTriangleLines  :: proc(dst: ^Image, v1, v2, v3: Vector2, color: Color) ---                                                      // Draw triangle outline within an image
 	ImageDrawTriangleFan    :: proc(dst: ^Image, points: [^]Vector2, pointCount: c.int, color: Color) ---                                    // Draw a triangle fan defined by points within an image (first vertex is the center)
 	ImageDrawTriangleStrip  :: proc(dst: ^Image, points: [^]Vector2, pointCount: c.int, color: Color) ---                                    // Draw a triangle strip defined by points within an image
-	ImageDraw               :: proc(dst: ^Image, src: Image, srcRec, dstRec: Rectangle, tint: Color) ---                                     // Draw a source image within a destination image (tint applied to source)
+	ImageDrawImage          :: proc(dst: ^Image, src: Image, posX, posY: c.int, tint: Color) ---                                             // Draw an image within an image
+	ImageDrawImageEx        :: proc(dst: ^Image, src: Image, position: Vector2, rotation: f32, scale: f32, tint: Color) ---                  // Draw an image with scaling and rotation within an image
+	ImageDrawImageRec       :: proc(dst: ^Image, src: Image, srcRec: Rectangle, position: Vector2, tint: Color) ---                          // Draw a part of an image defined by a rectangle within an image
+	ImageDrawImagePro       :: proc(dst: ^Image, src: Image, srcRec, dstRec: Rectangle, origin: Vector2, rotation: f32, tint: Color) ---     // Draw a part of an image into a destination rectangle, with scaling and rotation, within an image
 	ImageDrawText           :: proc(dst: ^Image, text: cstring, posX, posY: c.int, fontSize: c.int, color: Color) ---                        // Draw text (using default font) within an image (destination)
 	ImageDrawTextEx         :: proc(dst: ^Image, font: Font, text: cstring, position: Vector2, fontSize: f32, spacing: f32, tint: Color) --- // Draw text (custom sprite font) within an image (destination)
+	ImageDrawTextPro        :: proc(dst: ^Image, font: Font, text: cstring, position, origin: Vector2, rotation, fontSize, spacing: f32, tint: Color) --- // Draw text using Font and pro parameters (rotation)
 
 	// Texture loading functions
 	// NOTE: These functions require GPU access
@@ -1439,6 +1459,7 @@ foreign lib {
 	LoadTextureFromImage :: proc(image: Image) -> Texture2D ---                             // Load texture from image data
 	LoadTextureCubemap   :: proc(image: Image, layout: CubemapLayout) -> TextureCubemap --- // Load cubemap from image, multiple image cubemap layouts supported
 	LoadRenderTexture    :: proc(width, height: c.int) -> RenderTexture2D ---               // Load texture for rendering (framebuffer)
+	LoadRenderTextureEx  :: proc(width, height: c.int, format: PixelFormat) -> RenderTexture2D --- // Load texture for rendering (framebuffer), with specific format
 	IsTextureValid       :: proc(texture: Texture2D) -> bool ---                            // Check if a texture is valid
 	UnloadTexture        :: proc(texture: Texture2D) ---                                    // Unload texture from GPU memory (VRAM)
 	IsRenderTextureValid :: proc(target: RenderTexture2D) -> bool  ---                      // Check if a render texture is valid
@@ -1464,7 +1485,7 @@ foreign lib {
 	// Color/pixel related functions
 
 	@(deprecated="Prefer col1 == col2")
-	ColorIsEqual        :: proc(col1, col2: Color) ---                                  // Check if two colors are equal
+	ColorIsEqual        :: proc(col1, col2: Color) -> bool ---                            // Check if two colors are equal
 	Fade                :: proc(color: Color, alpha: f32) -> Color ---                  // Get color with alpha applied, alpha goes from 0.0f to 1.0f
 	ColorToInt          :: proc(color: Color) -> c.uint ---                             // Get hexadecimal value for a Color (0xRRGGBBAA)
 	ColorNormalize      :: proc(color: Color) -> Vector4 ---                            // Get Color normalized as float [0..1]
