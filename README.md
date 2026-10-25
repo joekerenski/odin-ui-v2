@@ -82,7 +82,7 @@ The frame loop times itself, with nothing for the app to add ([ui/perf.odin](ui/
 | Layout | `begin_layout` to `end_layout`: building the UI and Clay's layout |
 | Draw | `begin_draw` to the last draw call: host drawing, `render`, the upload |
 | CPU | `frame` returning to the last draw call: all of the above |
-| GPU | the frame's draw calls, from timer queries read three frames late, so reading never stalls |
+| GPU | the frame's draw calls, from timer queries read three frames late, so reading never stalls; from `ui.perf_gpu_begin()` on, when the app does GPU work before `begin_draw` (a simulation, render-to-texture) |
 | Swap | `end_draw`'s present wait and swap: mostly waiting, not budgeted |
 | Frame | one frame to the next |
 

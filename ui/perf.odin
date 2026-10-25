@@ -18,7 +18,9 @@ import gl "vendor:OpenGL"
 //   Draw    begin_draw to the last draw call: host drawing, render, the upload
 //   CPU     `frame` returning to the last draw call: all of the above
 //   GPU     the frame's draw calls, from GL_TIME_ELAPSED queries read three
-//           frames late, so reading them never stalls
+//           frames late, so reading them never stalls. A host that does GPU
+//           work before begin_draw (a simulation, render-to-texture) calls
+//           perf_gpu_begin first, so that counts too
 //   Swap    end_draw's present wait and swap: mostly waiting, shown, not budgeted
 //   Frame   from one frame to the next
 //
@@ -279,14 +281,20 @@ perf_layout_end :: proc() {
 	s_perf.cur[.Layout] = perf_since(s_perf.t_layout)
 }
 
-// begin_draw: the GPU query opens before anything is drawn.
-@(private)
-perf_draw_begin :: proc() {
-	s_perf.t_draw = time.tick_now()
-	if s_perf.gpu_ok {
+// The frame's GPU time starts here, if not already: before GPU work a host
+// does ahead of begin_draw. Call it after `frame` returns.
+perf_gpu_begin :: proc() {
+	if s_perf.gpu_ok && !s_perf.gpu_open {
 		gl.BeginQuery(gl.TIME_ELAPSED, s_perf.queries[s_perf.gpu_frame % GPU_RING])
 		s_perf.gpu_open = true
 	}
+}
+
+// begin_draw: the GPU query opens before anything is drawn, unless the host opened it.
+@(private)
+perf_draw_begin :: proc() {
+	s_perf.t_draw = time.tick_now()
+	perf_gpu_begin()
 }
 
 // end_draw, after the last draw call and before the present wait. The
