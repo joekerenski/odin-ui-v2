@@ -76,6 +76,11 @@ perf_stats :: proc() -> (s: Perf_Stats) {
 	return
 }
 
+// The parts of the last frame drawn, in ms (GPU from three frames before).
+perf_frame :: proc() -> [Perf_Part]f32 {
+	return s_perf.cur
+}
+
 // Record every frame from `warmup` frames on, for perf_report.
 perf_bench_start :: proc(warmup := 30) {
 	for p in Perf_Part {
@@ -126,6 +131,11 @@ perf_report :: proc(title: string) -> (ok: bool) {
 
 @(private)
 debug_strip_on := true
+
+// Show or hide the debug strip; F3 toggles it. Shown at first.
+show_debug_strip :: proc(on: bool) {
+	debug_strip_on = on
+}
 
 // The timing and the UI's counts, floating in the top right. Call while
 // building the UI, every frame; F3 toggles it.
